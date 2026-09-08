@@ -29,7 +29,7 @@ canvas { position: absolute; left: 55px; top: 35px; width: 390px; height: 450px;
 const vscode = acquireVsCodeApi(); const canvas = document.getElementById('screen'); const crown = document.getElementById('crown'); const sideButton = document.getElementById('side-button'); const streamUrl = ${JSON.stringify(streamUrl)};
 const status = document.getElementById('status');
 const stage = document.getElementById('stage'); const nativeSurface = document.getElementById('native-surface');
-let logicalWidth = ${width}; let logicalHeight = ${height}; const frameStride = ${width * 2}; let pointerActive = false; let connected = false; let latestFrame; let renderScheduled = false; let socket; let reconnectTimer; let reconnectAttempt = 0;
+let logicalWidth = ${width}; let logicalHeight = ${height}; const frameStride = ${width * 2}; let pointerActive = false; let connected = false; let latestFrame; let renderScheduled = false; let pendingWheelDelta = 0; let wheelFlushScheduled = false; let socket; let reconnectTimer; let reconnectAttempt = 0;
 let renderedFrames = 0; let fpsWindowStart = performance.now();
 function setStatus(text) { status.textContent = text; }
 function layoutNativeSurface() { const availableWidth = Math.max(1, Math.min(500, window.innerWidth - 24)); const availableHeight = Math.max(1, Math.min(520, window.innerHeight - 40)); const scale = Math.min(availableWidth / 500, availableHeight / 520); stage.style.width = (500 * scale) + 'px'; stage.style.height = (520 * scale) + 'px'; nativeSurface.style.transform = 'translate(-50%, -50%) scale(' + scale + ')'; }
@@ -103,6 +103,13 @@ canvas.addEventListener('pointerdown', event => { pointerActive = true; canvas.s
 canvas.addEventListener('pointermove', event => { if (pointerActive) sendPointer('move', event); event.preventDefault(); });
 function releasePointer(event) { if (!pointerActive) return; pointerActive = false; sendPointer('up', event); event.preventDefault(); }
 canvas.addEventListener('pointerup', releasePointer); canvas.addEventListener('pointercancel', releasePointer);
+function flushWheel() { wheelFlushScheduled = false; const delta = Math.round(pendingWheelDelta); pendingWheelDelta -= delta;
+  if (delta !== 0 && socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'wheel', delta }));
+  if (Math.abs(pendingWheelDelta) >= 1) { wheelFlushScheduled = true; requestAnimationFrame(flushWheel); } }
+canvas.addEventListener('wheel', event => { const rect = canvas.getBoundingClientRect(); let delta = event.deltaY;
+  if (event.deltaMode === 1) delta *= 16; else if (event.deltaMode === 2) delta *= logicalHeight;
+  pendingWheelDelta += delta * logicalHeight / rect.height; if (!wheelFlushScheduled) { wheelFlushScheduled = true; requestAnimationFrame(flushWheel); }
+  event.preventDefault(); }, { passive: false });
 function bindHardwareButton(element, button) { let longPress = false; let timer;
   element.addEventListener('pointerdown', event => { longPress = false; element.setPointerCapture(event.pointerId);
     if (button === 'crown') timer = setTimeout(() => { longPress = true; sendButton('crown', 'longPress'); }, 500); event.preventDefault(); });
