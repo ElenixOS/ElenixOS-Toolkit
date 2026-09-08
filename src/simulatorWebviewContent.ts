@@ -29,7 +29,7 @@ canvas { position: absolute; left: 55px; top: 35px; width: 390px; height: 450px;
 const vscode = acquireVsCodeApi(); const canvas = document.getElementById('screen'); const crown = document.getElementById('crown'); const sideButton = document.getElementById('side-button'); const streamUrl = ${JSON.stringify(streamUrl)};
 const status = document.getElementById('status');
 const stage = document.getElementById('stage'); const nativeSurface = document.getElementById('native-surface');
-let logicalWidth = ${width}; let logicalHeight = ${height}; const frameStride = ${width * 2}; let pointerActive = false; let connected = false; let latestFrame; let renderScheduled = false;
+let logicalWidth = ${width}; let logicalHeight = ${height}; const frameStride = ${width * 2}; let pointerActive = false; let connected = false; let latestFrame; let renderScheduled = false; let socket; let reconnectTimer; let reconnectAttempt = 0;
 let renderedFrames = 0; let fpsWindowStart = performance.now();
 function setStatus(text) { status.textContent = text; }
 function layoutNativeSurface() { const availableWidth = Math.max(1, Math.min(500, window.innerWidth - 24)); const availableHeight = Math.max(1, Math.min(520, window.innerHeight - 40)); const scale = Math.min(availableWidth / 500, availableHeight / 520); stage.style.width = (500 * scale) + 'px'; stage.style.height = (520 * scale) + 'px'; nativeSurface.style.transform = 'translate(-50%, -50%) scale(' + scale + ')'; }
@@ -114,13 +114,21 @@ function scheduleRender() { if (renderScheduled) return; renderScheduled = true;
 function renderLatestFrame() { renderScheduled = false; const frame = latestFrame; latestFrame = undefined; if (!frame) return;
   drawFrame(frame.bytes, frame.width, frame.height, frame.stride); renderedFrames++; const now = performance.now();
   if (now - fpsWindowStart >= 1000) { setStatus((connected ? 'Connected · ' : 'Rendering · ') + renderMode + ' · ' + renderedFrames + ' FPS'); renderedFrames = 0; fpsWindowStart = now; }
-  if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'presented' })); if (latestFrame) scheduleRender(); }
-const socket = new WebSocket(streamUrl); socket.binaryType = 'arraybuffer';
-socket.addEventListener('open', () => { connected = true; setStatus('Connected · ' + renderMode); });
-socket.addEventListener('close', () => { connected = false; setStatus('Simulator disconnected'); vscode.postMessage({ type: 'connectionLost', viewId: ${JSON.stringify(nonce)} }); });
-socket.addEventListener('error', () => { if (!connected) setStatus('WebSocket connection failed'); });
-socket.addEventListener('message', event => { if (!(event.data instanceof ArrayBuffer)) return; const bytes = new Uint8Array(event.data);
-  if (bytes.length < frameStride * logicalHeight) return; latestFrame = { bytes, width: logicalWidth, height: logicalHeight, stride: frameStride }; scheduleRender(); });
+  if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'presented' })); if (latestFrame) scheduleRender(); }
+function scheduleReconnect() { if (reconnectTimer !== undefined) return; const delay = Math.min(2000, 100 * Math.pow(2, Math.min(reconnectAttempt, 5))); reconnectAttempt++; setStatus('Simulator disconnected · reconnecting…'); reconnectTimer = setTimeout(() => { reconnectTimer = undefined; connectSocket(); }, delay); }
+function connectSocket() {
+  if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) return;
+  let client;
+  try { client = new WebSocket(streamUrl); } catch { socket = undefined; scheduleReconnect(); return; }
+  client.binaryType = 'arraybuffer'; socket = client;
+  client.addEventListener('open', () => { if (socket !== client) return; reconnectAttempt = 0; connected = true; setStatus('Connected · ' + renderMode); });
+  client.addEventListener('close', () => { if (socket !== client) return; socket = undefined; connected = false; setStatus('Simulator disconnected'); vscode.postMessage({ type: 'connectionLost', viewId: ${JSON.stringify(nonce)} }); scheduleReconnect(); });
+  client.addEventListener('error', () => { if (socket === client && !connected) setStatus('WebSocket connection failed · retrying…'); });
+  client.addEventListener('message', event => { if (socket !== client || !(event.data instanceof ArrayBuffer)) return; const bytes = new Uint8Array(event.data);
+    if (bytes.length < frameStride * logicalHeight) return; latestFrame = { bytes, width: logicalWidth, height: logicalHeight, stride: frameStride }; scheduleRender(); });
+}
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { if (!socket || socket.readyState === WebSocket.CLOSED) scheduleReconnect(); else if (latestFrame) scheduleRender(); } });
+connectSocket();
 window.addEventListener('message', event => { const message = event.data; if (message.type === 'status') setStatus(message.text); });
 </script></body></html>`;
 }

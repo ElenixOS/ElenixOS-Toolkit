@@ -263,12 +263,11 @@ export class SimulatorManager implements vscode.Disposable {
 	}
 
 	webviewConnectionLost(): void {
-		if (!this.active) return;
 		/* A WebSocket close is not sufficient evidence that the Native process
-		 * has died. Keep the debug session and ready marker alive so the panel
-		 * can be recreated and reconnect to the same Simulator. Process exit,
-		 * panel disposal, and extension disposal still own full cleanup. */
-		this.webview.setStatus('Simulator disconnected; waiting for restart handshake…');
+		 * has died. The Webview owns the reconnect loop and its status text; keep
+		 * the debug session and ready marker alive so it can reconnect to this
+		 * endpoint. Process exit, panel disposal, and extension disposal still
+		 * own full cleanup. */
 	}
 
 	dispose(): void {
