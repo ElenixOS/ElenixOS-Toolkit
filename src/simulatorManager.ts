@@ -298,6 +298,12 @@ export class SimulatorManager implements vscode.Disposable {
 		active.readyPid = ready.pid;
 		active.websocketUrl = ready.websocket;
 		this.webview.show(ready.websocket, ready.width, ready.height);
+		if (active.kind === 'debug') {
+			/* CodeLLDB creates the integrated terminal before the Simulator's ready
+			 * handshake. Focus it after revealing the Webview so ESH is immediately
+			 * ready for input without requiring a manual terminal click. */
+			void vscode.commands.executeCommand('workbench.action.terminal.focus');
+		}
 	}
 
 	private watchReadyFile(active: ActiveSimulator): void {

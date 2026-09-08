@@ -28,7 +28,9 @@ export class SimulatorWebview implements vscode.Disposable {
 			this.panel.webview.html = getSimulatorWebviewHtml(viewId, width, height, streamUrl, assets);
 			/* Keep the existing editor group.  Passing Beside here would create
 			 * another group every time a debug session reconnects. */
-			this.panel.reveal(undefined, false);
+			/* Keep the CodeLLDB integrated terminal focused so ESH remains
+			 * immediately usable after the simulator Webview reconnects. */
+			this.panel.reveal(undefined, true);
 			return;
 		}
 		this.panel = vscode.window.createWebviewPanel('elenixosSimulator', 'ElenixOS Simulator', this.findEmptyEditorColumn(), {
@@ -42,7 +44,9 @@ export class SimulatorWebview implements vscode.Disposable {
 			sideButtonUri: this.panel.webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'SimulatorSideButton.png')).toString(),
 		};
 		this.panel.webview.html = getSimulatorWebviewHtml(viewId, width, height, streamUrl, panelAssets);
-		this.panel.reveal(undefined, false);
+		/* Reveal the simulator without stealing focus from CodeLLDB's
+		 * integrated terminal, which owns the ESH stdin stream. */
+		this.panel.reveal(undefined, true);
 	}
 
 	restore(panel: vscode.WebviewPanel): void {
