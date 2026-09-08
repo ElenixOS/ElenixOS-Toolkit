@@ -6,6 +6,19 @@ import * as vscode from 'vscode';
 import { createSimulatorIpcSocketPath } from './debugConfiguration';
 import { readReadyFile, waitForReadyFile, type SimulatorReadyInfo } from './ipc';
 import { SimulatorWebview } from './simulatorWebview';
+import { collectYModemFiles, YModemSender } from './ymodem';
+import { listUartPorts, sendEshYModemReceiveCommand, UartTransport } from './uart';
+
+const YMODEM_HISTORY_KEY = 'elenixosToolkit.ymodemHistory';
+const YMODEM_HISTORY_LIMIT = 50;
+
+interface YModemSourceAction extends vscode.QuickPickItem {
+	action: 'history' | 'browse';
+}
+
+interface YModemHistoryItem extends vscode.QuickPickItem {
+	sourcePath: string;
+}
 
 interface ActiveSimulator {
 	kind: 'manual' | 'debug';
@@ -25,7 +38,7 @@ export class SimulatorManager implements vscode.Disposable {
 	private active: ActiveSimulator | undefined;
 	private cleanupBarrier: Promise<void> = Promise.resolve();
 
-	constructor(private readonly webview: SimulatorWebview) {}
+	constructor(private readonly webview: SimulatorWebview, private readonly globalState: vscode.Memento) {}
 
 	async openManually(): Promise<void> {
 		await this.cleanupBarrier;
@@ -88,6 +101,153 @@ export class SimulatorManager implements vscode.Disposable {
 		this.active = active;
 		this.webview.setStatus('Waiting for Simulator ready handshake…');
 		void this.waitAndConnect(active);
+	}
+
+	async sendYModem(): Promise<void> {
+		const sourcePaths = await this.selectYModemSources();
+		if (!sourcePaths || sourcePaths.length === 0) return;
+
+		try {
+			const files = await collectYModemFiles(sourcePaths);
+			const destinationPath = await this.selectYModemDestination(sourcePaths, files);
+			if (!destinationPath) return;
+			await this.rememberYModemSources(sourcePaths);
+			const ports = (await listUartPorts()).sort((left, right) => left.path.localeCompare(right.path));
+			if (ports.length === 0) {
+				void vscode.window.showErrorMessage('No UART ports were found. Connect the target device and try again.');
+				return;
+			}
+			const port = await vscode.window.showQuickPick(
+				ports.map((info) => ({
+					label: info.path,
+					description: info.manufacturer ?? 'UART device',
+					detail: [info.serialNumber, info.vendorId && `VID ${info.vendorId}`, info.productId && `PID ${info.productId}`]
+						.filter(Boolean).join(' · '),
+					info,
+				})),
+				{ placeHolder: 'Select the UART connected to the ElenixOS device' },
+			);
+			if (!port) return;
+
+			const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', 115200);
+			const baudRateText = await vscode.window.showInputBox({
+				prompt: 'UART baud rate (8 data bits, no parity, 1 stop bit)',
+				value: String(configuredBaudRate),
+				validateInput: (value) => {
+					const baudRate = Number(value.trim());
+					return Number.isInteger(baudRate) && baudRate > 0 && baudRate <= 4_000_000
+						? undefined : 'Enter an integer baud rate between 1 and 4000000.';
+				},
+			});
+			if (!baudRateText) return;
+
+			const transport = new UartTransport(port.info.path, Number(baudRateText.trim()));
+			await vscode.window.withProgress(
+				{ location: vscode.ProgressLocation.Notification, title: `Sending with YMODEM over ${port.info.path}`, cancellable: false },
+				async (progress) => {
+					await transport.open();
+					try {
+						const sender = new YModemSender({
+							onProgress: ({ file, fileIndex, fileCount, bytesSent, totalBytes }) => {
+								const percent = totalBytes === 0 ? 100 : Math.floor((bytesSent * 100) / totalBytes);
+								progress.report({ message: `${fileIndex + 1}/${fileCount} ${file.transferName} (${percent}%)` });
+							},
+						});
+						await sender.send(files, transport, () => sendEshYModemReceiveCommand(transport, destinationPath));
+					}
+					finally {
+						await transport.close();
+					}
+				},
+			);
+			void vscode.window.showInformationMessage(`YMODEM transfer complete (${files.length} file${files.length === 1 ? '' : 's'}).`);
+		}
+		catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			void vscode.window.showErrorMessage(`YMODEM transfer failed: ${message}`);
+		}
+	}
+
+	private async selectYModemSources(): Promise<string[] | undefined> {
+		const history = this.getYModemHistory();
+		if (history.length === 0) return this.selectNewYModemSources();
+
+		const action = await vscode.window.showQuickPick<YModemSourceAction>([
+			{
+				label: '$(history) Select from YMODEM history',
+				description: `${history.length} saved source${history.length === 1 ? '' : 's'}`,
+				action: 'history',
+			},
+			{
+				label: '$(file-add) Choose new files or folders…',
+				action: 'browse',
+			},
+		], { placeHolder: 'Choose YMODEM sources' });
+		if (!action) return undefined;
+		if (action.action === 'browse') return this.selectNewYModemSources();
+
+		const items: YModemHistoryItem[] = await Promise.all(history.map(async (sourcePath) => {
+			let detail = 'Historical YMODEM source';
+			try {
+				const info = await fs.promises.stat(sourcePath);
+				detail = info.isDirectory() ? 'Folder' : 'File';
+			}
+			catch {
+				detail = 'Path is no longer available';
+			}
+			return {
+				label: path.basename(sourcePath) || sourcePath,
+				description: sourcePath,
+				detail,
+				sourcePath,
+			};
+		}));
+		const selected = await vscode.window.showQuickPick(items, {
+			canPickMany: true,
+			placeHolder: 'Select historical files or folders (name · path)',
+		});
+		return selected?.map((item) => item.sourcePath);
+	}
+
+	private async selectNewYModemSources(): Promise<string[] | undefined> {
+		const selected = await vscode.window.showOpenDialog({
+			canSelectFiles: true,
+			canSelectFolders: true,
+			canSelectMany: true,
+			openLabel: 'Send with YMODEM',
+		});
+		return selected?.map((uri) => uri.fsPath);
+	}
+
+	private async selectYModemDestination(sourcePaths: readonly string[], files: readonly { transferName: string }[]): Promise<string | undefined> {
+		const sourceInfo = await Promise.all(sourcePaths.map((sourcePath) => fs.promises.stat(sourcePath)));
+		const receivesBatch = files.length > 1 || sourceInfo.some((info) => info.isDirectory());
+		const defaultPath = receivesBatch ? '/tmp' : `/tmp/${files[0].transferName}`;
+		return vscode.window.showInputBox({
+			prompt: receivesBatch
+				? 'Existing device directory for ESH YMODEM receive'
+				: 'Device destination path for ESH YMODEM receive',
+			placeHolder: receivesBatch ? '/tmp' : '/tmp/file.bin',
+			value: defaultPath,
+			validateInput: (value) => {
+				const destinationPath = value.trim();
+				return destinationPath.length > 0 && !/[\u0000\r\n\t ]/.test(destinationPath)
+					? undefined : 'Enter a non-empty device path without whitespace or control characters.';
+			},
+		});
+	}
+
+	private async rememberYModemSources(sourcePaths: readonly string[]): Promise<void> {
+		const history = this.getYModemHistory();
+		const recent = [...sourcePaths.map((sourcePath) => path.resolve(sourcePath)), ...history]
+			.filter((sourcePath, index, all) => all.indexOf(sourcePath) === index)
+			.slice(0, YMODEM_HISTORY_LIMIT);
+		await this.globalState.update(YMODEM_HISTORY_KEY, recent);
+	}
+
+	private getYModemHistory(): string[] {
+		const value = this.globalState.get<unknown>(YMODEM_HISTORY_KEY);
+		return Array.isArray(value) ? value.filter((sourcePath): sourcePath is string => typeof sourcePath === 'string' && sourcePath.length > 0) : [];
 	}
 
 	terminateDebugSession(session: vscode.DebugSession): void {

@@ -18,6 +18,7 @@ displayed in a VS Code Webview.
 - Pointer and hardware-button input forwarding
 - Automatic Webview connection during Native debugging
 - Webview reuse and reconnection after Simulator restart
+- YMODEM sending of files and folders over UART
 - macOS, Linux, and Windows support for the current Simulator workflow
 
 ## Native Simulator Webview
@@ -67,6 +68,20 @@ server allows at most one frame in flight and replaces its pending frame with
 the newest one, so a slow Webview cannot create a latency queue. Pointer input
 is sent as small JSON control messages on the same WebSocket and is injected
 directly into the Simulator's existing LVGL input path.
+
+## YMODEM file transfer
+
+Connect the target device's UART and run `ElenixOS: Send File or Folder with
+YMODEM (UART)` from the Command Palette. Toolkit asks for the device receive
+path, clears the current ESH command line, and automatically sends the command
+`ymodem recv <path>` before starting the transfer.
+
+Toolkit selects the UART port and baud rate, then sends a CRC-16 YMODEM batch.
+For a folder or multiple files, use an existing directory as the ESH receive
+destination; the YMODEM header preserves each folder's relative path. The
+Previously selected files and folders are available from the YMODEM history
+list, where each entry shows its file name and full path. The Simulator is not
+used as the transport for this feature.
 
 ## IPC format
 

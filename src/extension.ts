@@ -11,7 +11,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		onClosed: () => manager.webviewClosed(),
 		onConnectionLost: () => manager.webviewConnectionLost(),
 	});
-	manager = new SimulatorManager(webview);
+	manager = new SimulatorManager(webview, context.globalState);
 	const webviewSerializer = vscode.window.registerWebviewPanelSerializer('elenixosSimulator', {
 		deserializeWebviewPanel: async (panel) => webview.restore(panel),
 	});
@@ -24,6 +24,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		debugIntegration,
 		webviewSerializer,
 		vscode.commands.registerCommand('elenixos-toolkit.openSimulator', () => manager.openManually()),
+		vscode.commands.registerCommand('elenixos-toolkit.sendYModem', () => manager.sendYModem()),
 		vscode.commands.registerCommand('elenixos-toolkit.helloWorld', () => vscode.window.showInformationMessage('ElenixOS-Toolkit is ready.')),
 	);
 }
