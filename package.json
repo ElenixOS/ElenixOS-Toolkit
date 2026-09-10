@@ -2,8 +2,29 @@
   "name": "elenixos-toolkit",
   "displayName": "ElenixOS-Toolkit",
   "description": "Development and debugging toolkit for ElenixOS",
-  "version": "0.0.1",
-  "publisher": "elenixos",
+  "version": "0.0.2",
+  "publisher": "ElenixOS",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ElenixOS/ElenixOS-Toolkit.git"
+  },
+  "license": "SEE LICENSE IN LICENSE",
+  "icon": "media/ElenixOSToolkitLogo.png",
+  "keywords": [
+    "ElenixOS",
+    "embedded",
+    "embedded systems",
+    "simulator",
+    "debugger",
+    "LVGL",
+    "UART",
+    "YMODEM",
+    "serial port",
+    "framebuffer",
+    "WebSocket",
+    "native simulator",
+    "device development"
+  ],
   "engines": {
     "vscode": "^1.136.0"
   },
