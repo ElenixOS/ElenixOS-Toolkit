@@ -24,6 +24,8 @@ export interface UartTransportOptions {
 	readonly writeChunkDelayMs?: number;
 }
 
+const openUartPaths = new Set<string>();
+
 export async function listUartPorts(): Promise<UartPortInfo[]> {
 	return SerialPort.list();
 }
@@ -73,9 +75,15 @@ function delay(milliseconds: number): Promise<void> {
 /** A raw UART byte transport used by the YMODEM sender. */
 export class UartTransport implements YModemTransport {
 	private readonly listeners = new Set<(data: Buffer) => void>();
+	private readonly errorListeners = new Set<(error: Error) => void>();
+	private readonly closeListeners = new Set<() => void>();
 	private readonly port: SerialPort;
 	private readonly writeChunkSize: number;
 	private readonly writeChunkDelayMs: number;
+	private lockHeld = false;
+	private openOperation: Promise<void> | undefined;
+	private closeOperation: Promise<void> | undefined;
+	private closeRequested = false;
 
 	constructor(readonly path: string, readonly baudRate: number, options: UartTransportOptions = {}) {
 		this.writeChunkSize = options.writeChunkSize ?? DEFAULT_YMODEM_UART_CHUNK_SIZE;
@@ -90,16 +98,51 @@ export class UartTransport implements YModemTransport {
 		this.port.on('data', (data: Buffer) => {
 			for (const listener of this.listeners) listener(data);
 		});
-		/* Keep device errors from becoming uncaught EventEmitter errors. Individual
-		 * open/write operations also install a one-shot listener and reject. */
-		this.port.on('error', () => undefined);
+		/* Keep device errors from becoming uncaught EventEmitter errors, while
+		 * allowing sessions to release their own state and show a useful message. */
+		this.port.on('error', (error: Error) => {
+			for (const listener of this.errorListeners) listener(error);
+			if (this.port.isOpen) void this.close().catch(() => undefined);
+			else this.releaseLock();
+		});
+		this.port.on('close', () => {
+			this.releaseLock();
+			for (const listener of this.closeListeners) listener();
+		});
 	}
 
 	open(): Promise<void> {
 		if (this.port.isOpen) return Promise.resolve();
-		return new Promise<void>((resolve, reject) => {
-			this.port.open((error) => error ? reject(error) : resolve());
+		if (this.openOperation) return this.openOperation;
+		if (openUartPaths.has(this.path)) {
+			return Promise.reject(new Error(`UART port is already in use by ElenixOS Toolkit: ${this.path}`));
+		}
+		openUartPaths.add(this.path);
+		this.lockHeld = true;
+		this.closeRequested = false;
+		const operation = new Promise<void>((resolve, reject) => {
+			this.port.open((error) => {
+				if (error) {
+					this.releaseLock();
+					reject(error);
+					return;
+				}
+				if (this.closeRequested) {
+					this.port.close((closeError) => {
+						this.releaseLock();
+						closeError ? reject(closeError) : resolve();
+					});
+					return;
+				}
+				resolve();
+			});
 		});
+		let pendingOperation: Promise<void>;
+		pendingOperation = operation.finally(() => {
+			if (this.openOperation === pendingOperation) this.openOperation = undefined;
+		});
+		this.openOperation = pendingOperation;
+		return pendingOperation;
 	}
 
 	async write(data: Buffer): Promise<void> {
@@ -149,10 +192,53 @@ export class UartTransport implements YModemTransport {
 		return () => this.listeners.delete(listener);
 	}
 
+	onError(listener: (error: Error) => void): () => void {
+		this.errorListeners.add(listener);
+		return () => this.errorListeners.delete(listener);
+	}
+
+	onClose(listener: () => void): () => void {
+		this.closeListeners.add(listener);
+		return () => this.closeListeners.delete(listener);
+	}
+
 	close(): Promise<void> {
-		if (!this.port.isOpen) return Promise.resolve();
-		return new Promise<void>((resolve, reject) => {
-			this.port.close((error) => error ? reject(error) : resolve());
+		if (this.closeOperation) return this.closeOperation;
+		if (this.openOperation) {
+			this.closeRequested = true;
+			const pendingClose = this.openOperation.catch(() => undefined).then(() => this.closePort());
+			let trackedClose: Promise<void>;
+			trackedClose = pendingClose.finally(() => {
+				if (this.closeOperation === trackedClose) this.closeOperation = undefined;
+			});
+			this.closeOperation = trackedClose;
+			return trackedClose;
+		}
+		return this.closePort();
+	}
+
+	private closePort(): Promise<void> {
+		if (!this.port.isOpen) {
+			this.releaseLock();
+			return Promise.resolve();
+		}
+		const pendingClose = new Promise<void>((resolve, reject) => {
+			this.port.close((error) => {
+				this.releaseLock();
+				error ? reject(error) : resolve();
+			});
 		});
+		let trackedClose: Promise<void>;
+		trackedClose = pendingClose.finally(() => {
+			if (this.closeOperation === trackedClose) this.closeOperation = undefined;
+		});
+		this.closeOperation = trackedClose;
+		return trackedClose;
+	}
+
+	private releaseLock(): void {
+		if (!this.lockHeld) return;
+		this.lockHeld = false;
+		openUartPaths.delete(this.path);
 	}
 }

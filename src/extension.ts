@@ -3,6 +3,7 @@ import { SimulatorDebugConfigurationProvider } from './debugConfiguration';
 import { DebugIntegration } from './debugIntegration';
 import { SimulatorManager } from './simulatorManager';
 import { SimulatorWebview } from './simulatorWebview';
+import { EshTerminalManager } from './eshTerminalManager';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const debugConfigurationProvider = new SimulatorDebugConfigurationProvider();
@@ -12,6 +13,7 @@ export function activate(context: vscode.ExtensionContext): void {
 		onConnectionLost: () => manager.webviewConnectionLost(),
 	});
 	manager = new SimulatorManager(webview, context.globalState);
+	const eshTerminal = new EshTerminalManager();
 	const webviewSerializer = vscode.window.registerWebviewPanelSerializer('elenixosSimulator', {
 		deserializeWebviewPanel: async (panel) => webview.restore(panel),
 	});
@@ -21,10 +23,13 @@ export function activate(context: vscode.ExtensionContext): void {
 		vscode.debug.registerDebugConfigurationProvider('lldb', debugConfigurationProvider),
 		vscode.debug.registerDebugConfigurationProvider('cppdbg', debugConfigurationProvider),
 		manager,
+		eshTerminal,
 		debugIntegration,
 		webviewSerializer,
 		vscode.commands.registerCommand('elenixos-toolkit.openSimulator', () => manager.openManually()),
 		vscode.commands.registerCommand('elenixos-toolkit.sendYModem', () => manager.sendYModem()),
+		vscode.commands.registerCommand('elenixos-toolkit.openEshTerminal', () => eshTerminal.open()),
+		vscode.commands.registerCommand('elenixos-toolkit.switchEshTerminalPort', () => eshTerminal.switchPort()),
 		vscode.commands.registerCommand('elenixos-toolkit.helloWorld', () => vscode.window.showInformationMessage('ElenixOS-Toolkit is ready.')),
 	);
 }

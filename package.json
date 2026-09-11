@@ -34,7 +34,9 @@
   "activationEvents": [
     "onStartupFinished",
     "onDebug",
-    "onWebviewPanel:elenixosSimulator"
+		"onWebviewPanel:elenixosSimulator",
+		"onCommand:elenixos-toolkit.openEshTerminal",
+		"onCommand:elenixos-toolkit.switchEshTerminalPort"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -50,6 +52,14 @@
       {
         "command": "elenixos-toolkit.sendYModem",
         "title": "ElenixOS: Send File or Folder with YMODEM (UART)"
+      },
+      {
+        "command": "elenixos-toolkit.openEshTerminal",
+        "title": "ElenixOS: Open ESH Terminal"
+      },
+      {
+        "command": "elenixos-toolkit.switchEshTerminalPort",
+        "title": "ElenixOS: Switch ESH Terminal Port"
       }
     ],
     "configuration": {
@@ -64,7 +74,7 @@
           "default": 115200,
           "minimum": 1,
           "maximum": 4000000,
-          "description": "Default UART baud rate used by ElenixOS: Send File or Folder with YMODEM (UART)."
+          "description": "Default UART baud rate used by the ElenixOS ESH Terminal and YMODEM transfer."
         },
         "elenixosToolkit.ymodemWriteChunkSize": {
           "type": "integer",

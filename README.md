@@ -19,6 +19,7 @@ displayed in a VS Code Webview.
 - Automatic Webview connection during Native debugging
 - Webview reuse and reconnection after Simulator restart
 - YMODEM sending of files and folders over UART
+- An ESH-specific interactive terminal over UART
 - macOS, Linux, and Windows support for the current Simulator workflow
 
 ## Native Simulator Webview
@@ -88,6 +89,19 @@ input queues: 16-byte chunks with a 20 ms delay. Adjust
 `elenixosToolkit.ymodemWriteChunkSize` and
 `elenixosToolkit.ymodemWriteChunkDelayMs`; set both to `0` when the receiver
 has adequate buffering or hardware flow control.
+
+## ESH Serial Terminal
+
+Connect the target device's debug UART and run `ElenixOS: Open ESH Terminal`
+from the Command Palette. Toolkit lists the available UART ports and uses
+`elenixosToolkit.uartBaudRate` (115200 by default). The terminal is a native
+VS Code pseudoterminal: ESH owns command editing, history, cursor movement,
+echo, and command execution, while VS Code handles ANSI/VT terminal rendering,
+scrollback, copy/paste, keyboard input, and resizing.
+
+Run `ElenixOS: Switch ESH Terminal Port` to reconnect the existing terminal to
+another device. Only one Toolkit feature may hold a given UART at a time, and
+closing the terminal or the extension releases the UART handle.
 
 ## IPC format
 
