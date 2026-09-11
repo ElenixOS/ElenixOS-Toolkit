@@ -57,7 +57,7 @@ export class EshTerminalPseudoterminal implements vscode.Pseudoterminal, vscode.
 	}
 
 	async connect(connection: EshTerminalConnection): Promise<void> {
-		if (this.disposed) throw new Error('ESH terminal has been disposed.');
+		if (this.disposed) {throw new Error('ESH terminal has been disposed.');}
 		await this.session.connect(connection);
 	}
 
@@ -66,9 +66,9 @@ export class EshTerminalPseudoterminal implements vscode.Pseudoterminal, vscode.
 	}
 
 	dispose(): void {
-		if (this.disposed) return;
+		if (this.disposed) {return;}
 		this.disposed = true;
-		if (this.outputTimer !== undefined) clearTimeout(this.outputTimer);
+		if (this.outputTimer !== undefined) {clearTimeout(this.outputTimer);}
 		this.outputTimer = undefined;
 		this.pendingOutput = '';
 		void this.session.close();
@@ -80,7 +80,7 @@ export class EshTerminalPseudoterminal implements vscode.Pseudoterminal, vscode.
 	}
 
 	private queueOutput(text: string): void {
-		if (!text || this.disposed) return;
+		if (!text || this.disposed) {return;}
 		this.pendingOutput += text;
 		if (this.pendingOutput.length >= OUTPUT_FLUSH_LIMIT) {
 			this.flushOutput();
@@ -92,9 +92,9 @@ export class EshTerminalPseudoterminal implements vscode.Pseudoterminal, vscode.
 	}
 
 	private flushOutput(): void {
-		if (this.outputTimer !== undefined) clearTimeout(this.outputTimer);
+		if (this.outputTimer !== undefined) {clearTimeout(this.outputTimer);}
 		this.outputTimer = undefined;
-		if (!this.opened || !this.pendingOutput) return;
+		if (!this.opened || !this.pendingOutput) {return;}
 		const output = this.pendingOutput;
 		this.pendingOutput = '';
 		this.writeEmitter.fire(output);

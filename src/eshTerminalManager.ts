@@ -15,14 +15,14 @@ export class EshTerminalManager implements vscode.Disposable {
 	private disposed = false;
 
 	async open(): Promise<void> {
-		if (this.disposed) return;
+		if (this.disposed) {return;}
 		if (this.terminal && this.pty?.isConnected()) {
 			this.terminal.show(true);
 			return;
 		}
 
 		const connection = await this.selectConnection();
-		if (!connection) return;
+		if (!connection) {return;}
 		const pty = this.ensureTerminal();
 		this.terminal?.show(true);
 		try {
@@ -36,9 +36,9 @@ export class EshTerminalManager implements vscode.Disposable {
 	}
 
 	async switchPort(): Promise<void> {
-		if (this.disposed) return;
+		if (this.disposed) {return;}
 		const connection = await this.selectConnection();
-		if (!connection) return;
+		if (!connection) {return;}
 		const pty = this.ensureTerminal();
 		this.terminal?.show(true);
 		try {
@@ -52,7 +52,7 @@ export class EshTerminalManager implements vscode.Disposable {
 	}
 
 	dispose(): void {
-		if (this.disposed) return;
+		if (this.disposed) {return;}
 		this.disposed = true;
 		this.terminalCloseSubscription?.dispose();
 		this.terminalCloseSubscription = undefined;
@@ -63,12 +63,12 @@ export class EshTerminalManager implements vscode.Disposable {
 	}
 
 	private ensureTerminal(): EshTerminalPseudoterminal {
-		if (this.terminal && this.pty) return this.pty;
+		if (this.terminal && this.pty) {return this.pty;}
 		/* A transient terminal can outlive an Extension Host reload in the UI,
 		 * but its old pseudoterminal can no longer own a session. Reclaim stale
 		 * terminals created by this feature before making the single replacement. */
 		for (const existing of vscode.window.terminals) {
-			if (existing.name === 'ElenixOS ESH') existing.dispose();
+			if (existing.name === 'ElenixOS ESH') {existing.dispose();}
 		}
 		const pty = new EshTerminalPseudoterminal();
 		const terminal = vscode.window.createTerminal({
@@ -80,8 +80,8 @@ export class EshTerminalManager implements vscode.Disposable {
 		this.pty = pty;
 		this.terminal = terminal;
 		this.terminalCloseSubscription = vscode.window.onDidCloseTerminal((closedTerminal) => {
-			if (closedTerminal !== terminal) return;
-			if (this.terminal !== terminal) return;
+			if (closedTerminal !== terminal) {return;}
+			if (this.terminal !== terminal) {return;}
 			this.terminalCloseSubscription?.dispose();
 			this.terminalCloseSubscription = undefined;
 			this.pty?.dispose();
@@ -113,7 +113,7 @@ export class EshTerminalManager implements vscode.Disposable {
 				.filter(Boolean).join(' · '),
 			path: info.path,
 		})), { placeHolder: 'Select the UART connected to the ElenixOS device' });
-		if (!selected) return undefined;
+		if (!selected) {return undefined;}
 
 		const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', 115200);
 		const baudRateText = await vscode.window.showInputBox({
@@ -125,7 +125,7 @@ export class EshTerminalManager implements vscode.Disposable {
 					? undefined : 'Enter an integer baud rate between 1 and 4000000.';
 			},
 		});
-		if (!baudRateText) return undefined;
+		if (!baudRateText) {return undefined;}
 		return { path: selected.path, baudRate: Number(baudRateText.trim()) };
 	}
 }

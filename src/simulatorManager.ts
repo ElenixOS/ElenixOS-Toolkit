@@ -44,7 +44,7 @@ export class SimulatorManager implements vscode.Disposable {
 		await this.cleanupBarrier;
 		if (this.active) {
 			const streamUrl = this.active.websocketUrl;
-			if (streamUrl) this.webview.show(streamUrl);
+			if (streamUrl) {this.webview.show(streamUrl);}
 			return;
 		}
 		const workspacePath = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
@@ -65,12 +65,12 @@ export class SimulatorManager implements vscode.Disposable {
 		const child = spawn(simulatorPath, ['--headless', '--ipc-socket', socketPath, '--ws-port', '0'], { cwd: workspacePath, stdio: 'inherit' });
 		active.process = child;
 		child.once('error', (error) => {
-			if (this.active?.id !== active.id) return;
+			if (this.active?.id !== active.id) {return;}
 			this.webview.setStatus(`Simulator failed to start: ${error.message}`);
 			void this.stopActive(active, false);
 		});
 		child.once('close', (code, signal) => {
-			if (this.active?.id !== active.id) return;
+			if (this.active?.id !== active.id) {return;}
 			this.webview.setStatus(`Simulator stopped (${signal ?? code ?? 'unknown'})`);
 			void this.stopActive(active, false);
 		});
@@ -78,7 +78,7 @@ export class SimulatorManager implements vscode.Disposable {
 	}
 
 	async connectDebugSession(session: vscode.DebugSession): Promise<void> {
-		if (!this.isSimulatorDebugSession(session) || !session.workspaceFolder) return;
+		if (!this.isSimulatorDebugSession(session) || !session.workspaceFolder) {return;}
 		await this.cleanupBarrier;
 		const configuredSocket = session.configuration.elenixosIpcSocket;
 		if (typeof configuredSocket !== 'string' || configuredSocket.length === 0) {
@@ -87,11 +87,11 @@ export class SimulatorManager implements vscode.Disposable {
 		}
 		if (this.active?.kind === 'debug' && this.active.id === session.id) {
 			const streamUrl = this.active.websocketUrl;
-			if (streamUrl) this.webview.show(streamUrl);
+			if (streamUrl) {this.webview.show(streamUrl);}
 			void this.refreshReady(this.active);
 			return;
 		}
-		if (this.active) await this.stopActive(this.active);
+		if (this.active) {await this.stopActive(this.active);}
 
 		const socketPath = path.resolve(session.workspaceFolder.uri.fsPath, configuredSocket);
 		const active: ActiveSimulator = {
@@ -105,12 +105,12 @@ export class SimulatorManager implements vscode.Disposable {
 
 	async sendYModem(): Promise<void> {
 		const sourcePaths = await this.selectYModemSources();
-		if (!sourcePaths || sourcePaths.length === 0) return;
+		if (!sourcePaths || sourcePaths.length === 0) {return;}
 
 		try {
 			const files = await collectYModemFiles(sourcePaths);
 			const destinationPath = await this.selectYModemDestination(sourcePaths, files);
-			if (!destinationPath) return;
+			if (!destinationPath) {return;}
 			await this.rememberYModemSources(sourcePaths);
 			const ports = (await listUartPorts()).sort((left, right) => left.path.localeCompare(right.path));
 			if (ports.length === 0) {
@@ -127,7 +127,7 @@ export class SimulatorManager implements vscode.Disposable {
 				})),
 				{ placeHolder: 'Select the UART connected to the ElenixOS device' },
 			);
-			if (!port) return;
+			if (!port) {return;}
 
 			const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', 115200);
 			const baudRateText = await vscode.window.showInputBox({
@@ -139,7 +139,7 @@ export class SimulatorManager implements vscode.Disposable {
 						? undefined : 'Enter an integer baud rate between 1 and 4000000.';
 				},
 			});
-			if (!baudRateText) return;
+			if (!baudRateText) {return;}
 
 			const uartConfiguration = vscode.workspace.getConfiguration('elenixosToolkit');
 			const writeChunkSize = uartConfiguration.get<number>('ymodemWriteChunkSize', 16);
@@ -176,7 +176,7 @@ export class SimulatorManager implements vscode.Disposable {
 
 	private async selectYModemSources(): Promise<string[] | undefined> {
 		const history = this.getYModemHistory();
-		if (history.length === 0) return this.selectNewYModemSources();
+		if (history.length === 0) {return this.selectNewYModemSources();}
 
 		const action = await vscode.window.showQuickPick<YModemSourceAction>([
 			{
@@ -189,8 +189,8 @@ export class SimulatorManager implements vscode.Disposable {
 				action: 'browse',
 			},
 		], { placeHolder: 'Choose YMODEM sources' });
-		if (!action) return undefined;
-		if (action.action === 'browse') return this.selectNewYModemSources();
+		if (!action) {return undefined;}
+		if (action.action === 'browse') {return this.selectNewYModemSources();}
 
 		const items: YModemHistoryItem[] = await Promise.all(history.map(async (sourcePath) => {
 			let detail = 'Historical YMODEM source';
@@ -257,11 +257,11 @@ export class SimulatorManager implements vscode.Disposable {
 	}
 
 	terminateDebugSession(session: vscode.DebugSession): void {
-		if (this.active?.kind === 'debug' && this.active.id === session.id) void this.stopActive(this.active);
+		if (this.active?.kind === 'debug' && this.active.id === session.id) {void this.stopActive(this.active);}
 	}
 
 	webviewClosed(): void {
-		if (!this.active) return;
+		if (!this.active) {return;}
 		const active = this.active;
 		/* A debug adapter owns the process, but the manager still owns the IPC
 		 * endpoint and must remove it when the panel goes away. */
@@ -280,18 +280,18 @@ export class SimulatorManager implements vscode.Disposable {
 		/* Keep the WebviewPanel alive for VS Code's panel serializer.  This lets
 		 * the next Extension Host activation reclaim the same Simulator window
 		 * instead of opening a duplicate panel. */
-		if (this.active) void this.stopActive(this.active);
+		if (this.active) {void this.stopActive(this.active);}
 	}
 
 	private async waitAndConnect(active: ActiveSimulator): Promise<void> {
 		try {
 			const ready = await waitForReadyFile(active.readyPath, active.abort.signal);
-			if (!this.isActive(active)) return;
+			if (!this.isActive(active)) {return;}
 			this.applyReady(active, ready);
 			this.watchReadyFile(active);
 			this.webview.setStatus('Connecting directly to Simulator…');
 		} catch (error) {
-			if (!this.isActive(active) || active.abort.signal.aborted) return;
+			if (!this.isActive(active) || active.abort.signal.aborted) {return;}
 			this.webview.setStatus(`Simulator connection failed: ${error instanceof Error ? error.message : String(error)}`);
 			await this.stopActive(active);
 		}
@@ -313,7 +313,7 @@ export class SimulatorManager implements vscode.Disposable {
 	}
 
 	private watchReadyFile(active: ActiveSimulator): void {
-		if (active.readyWatcher) return;
+		if (active.readyWatcher) {return;}
 		const directory = path.dirname(active.readyPath);
 		const filename = path.basename(active.readyPath);
 		try {
@@ -321,7 +321,7 @@ export class SimulatorManager implements vscode.Disposable {
 			 * the directory instead of the file because unlink/rename would close
 			 * a file-specific watcher during a debug restart. */
 			active.readyWatcher = fs.watch(directory, (_event, changedFilename) => {
-				if (changedFilename && changedFilename.toString() !== filename) return;
+				if (changedFilename && changedFilename.toString() !== filename) {return;}
 				void this.refreshReady(active);
 			});
 		} catch (error) {
@@ -330,11 +330,11 @@ export class SimulatorManager implements vscode.Disposable {
 	}
 
 	private async refreshReady(active: ActiveSimulator): Promise<void> {
-		if (!this.isActive(active) || active.abort.signal.aborted) return;
+		if (!this.isActive(active) || active.abort.signal.aborted) {return;}
 		try {
 			const ready = await readReadyFile(active.readyPath);
-			if (!ready || !this.isActive(active)) return;
-			if (ready.pid === active.readyPid && ready.websocket === active.websocketUrl) return;
+			if (!ready || !this.isActive(active)) {return;}
+			if (ready.pid === active.readyPid && ready.websocket === active.websocketUrl) {return;}
 
 			/* A native debug restart creates a new WebSocket endpoint while keeping
 			 * the same VS Code DebugSession. Rebuild only the Webview document; this
@@ -349,7 +349,7 @@ export class SimulatorManager implements vscode.Disposable {
 	}
 
 	private stopActive(active: ActiveSimulator, killProcess = true): Promise<void> {
-		if (this.active?.id === active.id) this.active = undefined;
+		if (this.active?.id === active.id) {this.active = undefined;}
 		const cleanup = this.cleanupBarrier.then(async () => {
 			active.abort.abort();
 			active.readyWatcher?.close();
@@ -358,13 +358,13 @@ export class SimulatorManager implements vscode.Disposable {
 				await Promise.resolve(vscode.debug.stopDebugging(active.debugSession)).catch(() => false);
 			}
 			else if (killProcess && active.process && !active.process.killed) {
-				if (process.platform === 'win32') active.process.kill();
-				else active.process.kill('SIGTERM');
+				if (process.platform === 'win32') {active.process.kill();}
+				else {active.process.kill('SIGTERM');}
 				await new Promise<void>((resolve) => {
 					const timer = setTimeout(() => {
 						if (active.process && !active.process.killed) {
-							if (process.platform === 'win32') active.process.kill();
-							else active.process.kill('SIGKILL');
+							if (process.platform === 'win32') {active.process.kill();}
+							else {active.process.kill('SIGKILL');}
 						}
 						resolve();
 					}, 1500);

@@ -64,7 +64,7 @@ export async function sendEshYModemReceiveCommand(transport: YModemTransport, de
 async function writeInChunks(transport: YModemTransport, data: Buffer): Promise<void> {
 	for (let offset = 0; offset < data.length; offset += ESH_CLEAR_CHUNK_SIZE) {
 		await transport.write(data.subarray(offset, offset + ESH_CLEAR_CHUNK_SIZE));
-		if (offset + ESH_CLEAR_CHUNK_SIZE < data.length) await delay(ESH_CLEAR_CHUNK_DELAY_MS);
+		if (offset + ESH_CLEAR_CHUNK_SIZE < data.length) {await delay(ESH_CLEAR_CHUNK_DELAY_MS);}
 	}
 }
 
@@ -96,24 +96,24 @@ export class UartTransport implements YModemTransport {
 		}
 		this.port = new SerialPort({ path, baudRate, autoOpen: false });
 		this.port.on('data', (data: Buffer) => {
-			for (const listener of this.listeners) listener(data);
+			for (const listener of this.listeners) {listener(data);}
 		});
 		/* Keep device errors from becoming uncaught EventEmitter errors, while
 		 * allowing sessions to release their own state and show a useful message. */
 		this.port.on('error', (error: Error) => {
-			for (const listener of this.errorListeners) listener(error);
-			if (this.port.isOpen) void this.close().catch(() => undefined);
-			else this.releaseLock();
+			for (const listener of this.errorListeners) {listener(error);}
+			if (this.port.isOpen) {void this.close().catch(() => undefined);}
+			else {this.releaseLock();}
 		});
 		this.port.on('close', () => {
 			this.releaseLock();
-			for (const listener of this.closeListeners) listener();
+			for (const listener of this.closeListeners) {listener();}
 		});
 	}
 
 	open(): Promise<void> {
-		if (this.port.isOpen) return Promise.resolve();
-		if (this.openOperation) return this.openOperation;
+		if (this.port.isOpen) {return Promise.resolve();}
+		if (this.openOperation) {return this.openOperation;}
 		if (openUartPaths.has(this.path)) {
 			return Promise.reject(new Error(`UART port is already in use by ElenixOS Toolkit: ${this.path}`));
 		}
@@ -139,14 +139,14 @@ export class UartTransport implements YModemTransport {
 		});
 		let pendingOperation: Promise<void>;
 		pendingOperation = operation.finally(() => {
-			if (this.openOperation === pendingOperation) this.openOperation = undefined;
+			if (this.openOperation === pendingOperation) {this.openOperation = undefined;}
 		});
 		this.openOperation = pendingOperation;
 		return pendingOperation;
 	}
 
 	async write(data: Buffer): Promise<void> {
-		if (!this.port.isOpen) return Promise.reject(new Error(`UART is not open: ${this.path}`));
+		if (!this.port.isOpen) {return Promise.reject(new Error(`UART is not open: ${this.path}`));}
 		if (this.writeChunkSize === 0) {
 			await this.writeChunk(data);
 			return;
@@ -164,14 +164,14 @@ export class UartTransport implements YModemTransport {
 			let settled = false;
 			const cleanup = (): void => { this.port.off('error', onError); };
 			const finish = (error?: Error | null): void => {
-				if (settled) return;
+				if (settled) {return;}
 				settled = true;
 				cleanup();
-				if (error) reject(error);
-				else this.port.drain((drainError) => drainError ? reject(drainError) : resolve());
+				if (error) {reject(error);}
+				else {this.port.drain((drainError) => drainError ? reject(drainError) : resolve());}
 			};
 			const onError = (error: Error): void => {
-				if (settled) return;
+				if (settled) {return;}
 				settled = true;
 				cleanup();
 				reject(error);
@@ -203,13 +203,13 @@ export class UartTransport implements YModemTransport {
 	}
 
 	close(): Promise<void> {
-		if (this.closeOperation) return this.closeOperation;
+		if (this.closeOperation) {return this.closeOperation;}
 		if (this.openOperation) {
 			this.closeRequested = true;
 			const pendingClose = this.openOperation.catch(() => undefined).then(() => this.closePort());
 			let trackedClose: Promise<void>;
 			trackedClose = pendingClose.finally(() => {
-				if (this.closeOperation === trackedClose) this.closeOperation = undefined;
+				if (this.closeOperation === trackedClose) {this.closeOperation = undefined;}
 			});
 			this.closeOperation = trackedClose;
 			return trackedClose;
@@ -230,14 +230,14 @@ export class UartTransport implements YModemTransport {
 		});
 		let trackedClose: Promise<void>;
 		trackedClose = pendingClose.finally(() => {
-			if (this.closeOperation === trackedClose) this.closeOperation = undefined;
+			if (this.closeOperation === trackedClose) {this.closeOperation = undefined;}
 		});
 		this.closeOperation = trackedClose;
 		return trackedClose;
 	}
 
 	private releaseLock(): void {
-		if (!this.lockHeld) return;
+		if (!this.lockHeld) {return;}
 		this.lockHeld = false;
 		openUartPaths.delete(this.path);
 	}

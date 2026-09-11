@@ -47,7 +47,7 @@ export class SimulatorIpcClient extends EventEmitter {
 	private handshakeReject: ((error: Error) => void) | undefined;
 
 	async connect(socketPath: string): Promise<void> {
-		if (this.socket) throw new Error('Simulator IPC client is already connected');
+		if (this.socket) {throw new Error('Simulator IPC client is already connected');}
 
 		await new Promise<void>((resolve, reject) => {
 			const tcpEndpoint = /^tcp:\/\/(.+):(\d+)$/.exec(socketPath);
@@ -63,11 +63,11 @@ export class SimulatorIpcClient extends EventEmitter {
 			});
 			socket.on('data', (chunk: Buffer) => this.handleData(chunk));
 			socket.on('error', (error: Error) => {
-				if (!this.connected) this.handshakeReject?.(error);
+				if (!this.connected) {this.handshakeReject?.(error);}
 				this.emit('error', error);
 			});
 			socket.once('close', () => {
-				if (!this.connected) this.handshakeReject?.(new Error('Simulator IPC connection closed during handshake'));
+				if (!this.connected) {this.handshakeReject?.(new Error('Simulator IPC connection closed during handshake'));}
 				this.connected = false;
 				this.socket = undefined;
 				this.emit('closed');
@@ -76,7 +76,7 @@ export class SimulatorIpcClient extends EventEmitter {
 	}
 
 	sendInput(action: PointerAction, x: number, y: number): void {
-		if (!this.socket || !this.connected) return;
+		if (!this.socket || !this.connected) {return;}
 		const payload = Buffer.alloc(9);
 		payload[0] = action === 'down' ? 1 : action === 'move' ? 2 : 3;
 		payload.writeInt32BE(Math.trunc(x), 1);
@@ -95,7 +95,7 @@ export class SimulatorIpcClient extends EventEmitter {
 	}
 
 	private writeMessage(type: number, payload: Buffer): void {
-		if (!this.socket) return;
+		if (!this.socket) {return;}
 		const header = Buffer.alloc(IPC_HEADER_SIZE);
 		MAGIC.copy(header, 0);
 		header.writeUInt16BE(IPC_VERSION, 4);
@@ -121,7 +121,7 @@ export class SimulatorIpcClient extends EventEmitter {
 				return;
 			}
 			const messageLength = IPC_HEADER_SIZE + payloadLength;
-			if (this.receiveBuffer.length < messageLength) return;
+			if (this.receiveBuffer.length < messageLength) {return;}
 			const payload = this.receiveBuffer.subarray(IPC_HEADER_SIZE, messageLength);
 			this.receiveBuffer = this.receiveBuffer.subarray(messageLength);
 			this.handleMessage(type, payload);
@@ -137,7 +137,7 @@ export class SimulatorIpcClient extends EventEmitter {
 			this.emit('connected');
 			return;
 		}
-		if (type !== IpcMessageType.Frame || payload.length < IPC_FRAME_META_SIZE) return;
+		if (type !== IpcMessageType.Frame || payload.length < IPC_FRAME_META_SIZE) {return;}
 		const width = payload.readUInt32BE(0);
 		const height = payload.readUInt32BE(4);
 		const stride = payload.readUInt32BE(8);
@@ -147,7 +147,7 @@ export class SimulatorIpcClient extends EventEmitter {
 		 * before the Webview transport.  The latest-frame queue owns the view
 		 * until it is replaced or consumed. */
 		const pixels = payload.subarray(IPC_FRAME_META_SIZE);
-		if (format !== 1 || width <= 0 || height <= 0 || stride < width * 2 || pixels.length < stride * height) return;
+		if (format !== 1 || width <= 0 || height <= 0 || stride < width * 2 || pixels.length < stride * height) {return;}
 		this.emit('frame', { width, height, stride, format: 'rgb565-le', pixels } satisfies SimulatorFrame);
 	}
 
@@ -165,7 +165,7 @@ export async function readReadyFile(readyPath: string): Promise<SimulatorReadyIn
 			|| typeof parsed.socket !== 'string' || typeof parsed.pid !== 'number'
 			|| typeof parsed.width !== 'number' || typeof parsed.height !== 'number'
 			|| parsed.format !== 'rgb565-le' || typeof parsed.websocket !== 'string'
-			|| !/^ws:\/\/127\.0\.0\.1:\d+\/\?token=[0-9a-f]+$/.test(parsed.websocket)) return undefined;
+			|| !/^ws:\/\/127\.0\.0\.1:\d+\/\?token=[0-9a-f]+$/.test(parsed.websocket)) {return undefined;}
 		return parsed as SimulatorReadyInfo;
 	} catch {
 		return undefined;
@@ -175,7 +175,7 @@ export async function readReadyFile(readyPath: string): Promise<SimulatorReadyIn
 /** Wait for the atomic Simulator ready marker, rather than polling a PID. */
 export async function waitForReadyFile(readyPath: string, signal: AbortSignal): Promise<SimulatorReadyInfo> {
 	const existing = await readReadyFile(readyPath);
-	if (existing) return existing;
+	if (existing) {return existing;}
 
 	return await new Promise<SimulatorReadyInfo>((resolve, reject) => {
 		const directory = path.dirname(readyPath);
@@ -184,7 +184,7 @@ export async function waitForReadyFile(readyPath: string, signal: AbortSignal): 
 		let watcher: fs.FSWatcher | undefined;
 		const onAbort = (): void => finish(() => reject(new Error('Simulator startup cancelled')));
 		const finish = (callback: () => void): void => {
-			if (settled) return;
+			if (settled) {return;}
 			settled = true;
 			watcher?.close();
 			signal.removeEventListener('abort', onAbort);
@@ -192,13 +192,13 @@ export async function waitForReadyFile(readyPath: string, signal: AbortSignal): 
 		};
 		const inspect = async (): Promise<void> => {
 			const ready = await readReadyFile(readyPath);
-			if (ready) finish(() => resolve(ready));
+			if (ready) {finish(() => resolve(ready));}
 		};
 
 		signal.addEventListener('abort', onAbort, { once: true });
 		try {
 			watcher = fs.watch(directory, (_event, changedFilename) => {
-				if (!changedFilename || changedFilename.toString() === filename) void inspect();
+				if (!changedFilename || changedFilename.toString() === filename) {void inspect();}
 			});
 		} catch (error) {
 			finish(() => reject(error));

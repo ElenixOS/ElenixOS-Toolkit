@@ -151,12 +151,12 @@ class ControlByteQueue {
 
 	waitFor(accepted: readonly number[], timeoutMs: number): Promise<number> {
 		const immediate = this.take(accepted);
-		if (immediate !== undefined) return Promise.resolve(immediate);
+		if (immediate !== undefined) {return Promise.resolve(immediate);}
 
 		return new Promise<number>((resolve, reject) => {
 			const timer = setTimeout(() => {
 				const index = this.waiters.findIndex((waiter) => waiter.timer === timer);
-				if (index >= 0) this.waiters.splice(index, 1);
+				if (index >= 0) {this.waiters.splice(index, 1);}
 				reject(new Error(`Timed out waiting for YMODEM control byte (${accepted.map((value) => `0x${value.toString(16)}`).join(', ')})`));
 			}, timeoutMs);
 			this.waiters.push({ accepted, resolve, reject, timer });
@@ -174,15 +174,15 @@ class ControlByteQueue {
 	}
 
 	private push(data: Buffer): void {
-		for (const value of data) this.bytes.push(value);
+		for (const value of data) {this.bytes.push(value);}
 		this.resolveWaiter();
 	}
 
 	private resolveWaiter(): void {
 		const waiter = this.waiters[0];
-		if (!waiter) return;
+		if (!waiter) {return;}
 		const index = this.bytes.findIndex((value) => waiter.accepted.includes(value));
-		if (index < 0) return;
+		if (index < 0) {return;}
 		const value = this.bytes[index];
 		this.bytes.splice(0, index + 1);
 		this.waiters.shift();
@@ -192,7 +192,7 @@ class ControlByteQueue {
 
 	private take(accepted: readonly number[]): number | undefined {
 		const index = this.bytes.findIndex((value) => accepted.includes(value));
-		if (index < 0) return undefined;
+		if (index < 0) {return undefined;}
 		const value = this.bytes[index];
 		this.bytes.splice(0, index + 1);
 		return value;
@@ -213,7 +213,7 @@ export class YModemSender {
 	}
 
 	async send(files: readonly YModemFile[], transport: YModemTransport, prepare?: () => Promise<void>): Promise<void> {
-		if (files.length === 0) throw new Error('No files selected for YMODEM transfer.');
+		if (files.length === 0) {throw new Error('No files selected for YMODEM transfer.');}
 		const queue = new ControlByteQueue(transport);
 		try {
 			queue.clear();
@@ -237,7 +237,7 @@ export class YModemSender {
 				}
 			}
 
-			if (files.length > 1) await this.sendPacketWithAck(createHeader(), transport, queue);
+			if (files.length > 1) {await this.sendPacketWithAck(createHeader(), transport, queue);}
 		} catch (error) {
 			await transport.write(Buffer.from([YMODEM_CAN, YMODEM_CAN])).catch(() => undefined);
 			throw error;
@@ -262,7 +262,7 @@ export class YModemSender {
 			while (offset < file.size) {
 				const buffer = Buffer.alloc(PACKET_DATA_SIZE);
 				const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
-				if (bytesRead === 0) throw new Error(`File changed while sending: ${file.sourcePath}`);
+				if (bytesRead === 0) {throw new Error(`File changed while sending: ${file.sourcePath}`);}
 				await this.sendPacketWithAck(createPacket(YMODEM_STX, block, buffer.subarray(0, bytesRead), PACKET_DATA_SIZE), transport, queue);
 				offset += bytesRead;
 				sentBytes += bytesRead;
@@ -279,7 +279,7 @@ export class YModemSender {
 		for (let attempt = 0; attempt < this.maxRetries; attempt++) {
 			await transport.write(packet);
 			const response = await queue.waitFor([YMODEM_ACK, YMODEM_NAK], this.timeoutMs);
-			if (response === YMODEM_ACK) return;
+			if (response === YMODEM_ACK) {return;}
 		}
 		throw new Error('YMODEM receiver did not acknowledge the packet.');
 	}
@@ -288,10 +288,10 @@ export class YModemSender {
 		for (let attempt = 0; attempt < this.maxRetries; attempt++) {
 			await transport.write(Buffer.from([YMODEM_EOT]));
 			const response = await queue.waitFor([YMODEM_ACK, YMODEM_NAK], this.timeoutMs);
-			if (response === YMODEM_ACK) return;
+			if (response === YMODEM_ACK) {return;}
 			await transport.write(Buffer.from([YMODEM_EOT]));
 			const secondResponse = await queue.waitFor([YMODEM_ACK, YMODEM_NAK], this.timeoutMs);
-			if (secondResponse === YMODEM_ACK) return;
+			if (secondResponse === YMODEM_ACK) {return;}
 		}
 		throw new Error('YMODEM receiver did not finish the file.');
 	}

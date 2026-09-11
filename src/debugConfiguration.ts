@@ -23,14 +23,14 @@ export class SimulatorDebugConfigurationProvider implements vscode.DebugConfigur
 		_folder: vscode.WorkspaceFolder | undefined,
 		configuration: vscode.DebugConfiguration,
 	): vscode.DebugConfiguration {
-		if (configuration.elenixosSimulator !== true) return configuration;
+		if (configuration.elenixosSimulator !== true) {return configuration;}
 
 		const socketPath = createSimulatorIpcSocketPath();
 		const args = Array.isArray(configuration.args) ? [...configuration.args] as unknown[] : [];
 		const filteredArgs: unknown[] = [];
 		for (let index = 0; index < args.length; index++) {
 			const argument = args[index];
-			if (argument === '--headless') continue;
+			if (argument === '--headless') {continue;}
 			if (argument === '--ipc-socket') {
 				index++;
 				continue;
@@ -39,8 +39,8 @@ export class SimulatorDebugConfigurationProvider implements vscode.DebugConfigur
 				index++;
 				continue;
 			}
-			if (typeof argument === 'string' && argument.startsWith('--ipc-socket=')) continue;
-			if (typeof argument === 'string' && argument.startsWith('--ws-port=')) continue;
+			if (typeof argument === 'string' && argument.startsWith('--ipc-socket=')) {continue;}
+			if (typeof argument === 'string' && argument.startsWith('--ws-port=')) {continue;}
 			filteredArgs.push(argument);
 		}
 

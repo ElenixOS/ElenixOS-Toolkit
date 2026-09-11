@@ -50,7 +50,7 @@ export class SimulatorWebview implements vscode.Disposable {
 	}
 
 	restore(panel: vscode.WebviewPanel): void {
-		if (this.panel === panel) return;
+		if (this.panel === panel) {return;}
 		if (this.panel) {
 			/* VS Code should restore only one panel, but never create a second
 			 * simulator panel if a serializer is invoked more than once. */
@@ -96,7 +96,7 @@ export class SimulatorWebview implements vscode.Disposable {
 	private createNonce(): string {
 		const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
 		let nonce = '';
-		for (let i = 0; i < 32; i++) nonce += alphabet.charAt(Math.floor(Math.random() * alphabet.length));
+		for (let i = 0; i < 32; i++) {nonce += alphabet.charAt(Math.floor(Math.random() * alphabet.length));}
 		return nonce;
 	}
 }

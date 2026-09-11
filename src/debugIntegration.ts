@@ -9,8 +9,8 @@ export class DebugIntegration implements vscode.Disposable {
 
 	constructor(private readonly manager: SimulatorManager) {
 		const activeSession = vscode.debug.activeDebugSession;
-		if (activeSession) this.manager.connectDebugSession(activeSession);
+		if (activeSession) {this.manager.connectDebugSession(activeSession);}
 	}
 
-	dispose(): void { for (const disposable of this.disposables) disposable.dispose(); }
+	dispose(): void { for (const disposable of this.disposables) {disposable.dispose();} }
 }

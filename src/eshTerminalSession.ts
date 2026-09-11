@@ -32,15 +32,15 @@ export class EshTerminalSession {
 		const transport = new UartTransport(connection.path, connection.baudRate, { writeChunkSize: 0 });
 		this.transport = transport;
 		this.removeDataListener = transport.onData((data) => {
-			if (this.transport === transport) this.callbacks.onData(data);
+			if (this.transport === transport) {this.callbacks.onData(data);}
 		});
 		this.removeErrorListener = transport.onError((error) => {
-			if (this.transport !== transport) return;
+			if (this.transport !== transport) {return;}
 			this.callbacks.onError(error);
 			void this.closeTransport(transport);
 		});
 		this.removeCloseListener = transport.onClose(() => {
-			if (this.transport !== transport) return;
+			if (this.transport !== transport) {return;}
 			this.callbacks.onClosed();
 			this.clearTransport(transport);
 		});
@@ -61,7 +61,7 @@ export class EshTerminalSession {
 
 	write(data: string): Promise<void> {
 		const transport = this.transport;
-		if (!transport || !this.connected) return Promise.reject(new Error('ESH terminal is not connected to a UART port.'));
+		if (!transport || !this.connected) {return Promise.reject(new Error('ESH terminal is not connected to a UART port.'));}
 		/* Serialize writes so pasted commands and individual key events cannot
 		 * overtake one another on the serial stream. */
 		this.operation = this.operation.then(() => transport.write(Buffer.from(data, 'utf8')));
@@ -70,12 +70,12 @@ export class EshTerminalSession {
 
 	async close(): Promise<void> {
 		const transport = this.transport;
-		if (!transport) return;
+		if (!transport) {return;}
 		await this.closeTransport(transport);
 	}
 
 	private async closeTransport(transport: UartTransport): Promise<void> {
-		if (this.transport !== transport) return;
+		if (this.transport !== transport) {return;}
 		this.clearTransport(transport);
 		try {
 			await transport.close();
@@ -86,7 +86,7 @@ export class EshTerminalSession {
 	}
 
 	private clearTransport(transport: UartTransport): void {
-		if (this.transport !== transport) return;
+		if (this.transport !== transport) {return;}
 		this.removeDataListener?.();
 		this.removeErrorListener?.();
 		this.removeCloseListener?.();
