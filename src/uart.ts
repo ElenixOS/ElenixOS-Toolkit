@@ -10,8 +10,19 @@ const ESH_BACKSPACE = 0x08;
 const ESH_LINE_CAPACITY = 127;
 const ESH_CLEAR_CHUNK_SIZE = 16;
 const ESH_CLEAR_CHUNK_DELAY_MS = 5;
+/* Conservative defaults for receivers with a small software input queue.
+ * They remain configurable because a target may provide hardware flow
+ * control or a larger UART queue. */
+const DEFAULT_YMODEM_UART_CHUNK_SIZE = 16;
+const DEFAULT_YMODEM_UART_CHUNK_DELAY_MS = 20;
 
 export type UartPortInfo = Awaited<ReturnType<typeof SerialPort.list>>[number];
+
+export interface UartTransportOptions {
+	/** Set to 0 to write each YMODEM packet without host-side pacing. */
+	readonly writeChunkSize?: number;
+	readonly writeChunkDelayMs?: number;
+}
 
 export async function listUartPorts(): Promise<UartPortInfo[]> {
 	return SerialPort.list();
@@ -63,8 +74,18 @@ function delay(milliseconds: number): Promise<void> {
 export class UartTransport implements YModemTransport {
 	private readonly listeners = new Set<(data: Buffer) => void>();
 	private readonly port: SerialPort;
+	private readonly writeChunkSize: number;
+	private readonly writeChunkDelayMs: number;
 
-	constructor(readonly path: string, readonly baudRate: number) {
+	constructor(readonly path: string, readonly baudRate: number, options: UartTransportOptions = {}) {
+		this.writeChunkSize = options.writeChunkSize ?? DEFAULT_YMODEM_UART_CHUNK_SIZE;
+		this.writeChunkDelayMs = options.writeChunkDelayMs ?? DEFAULT_YMODEM_UART_CHUNK_DELAY_MS;
+		if (!Number.isInteger(this.writeChunkSize) || this.writeChunkSize < 0) {
+			throw new Error('UART write chunk size must be a non-negative integer.');
+		}
+		if (!Number.isInteger(this.writeChunkDelayMs) || this.writeChunkDelayMs < 0) {
+			throw new Error('UART write chunk delay must be a non-negative integer.');
+		}
 		this.port = new SerialPort({ path, baudRate, autoOpen: false });
 		this.port.on('data', (data: Buffer) => {
 			for (const listener of this.listeners) listener(data);
@@ -81,8 +102,21 @@ export class UartTransport implements YModemTransport {
 		});
 	}
 
-	write(data: Buffer): Promise<void> {
+	async write(data: Buffer): Promise<void> {
 		if (!this.port.isOpen) return Promise.reject(new Error(`UART is not open: ${this.path}`));
+		if (this.writeChunkSize === 0) {
+			await this.writeChunk(data);
+			return;
+		}
+		for (let offset = 0; offset < data.length; offset += this.writeChunkSize) {
+			await this.writeChunk(data.subarray(offset, offset + this.writeChunkSize));
+			if (offset + this.writeChunkSize < data.length && this.writeChunkDelayMs > 0) {
+				await delay(this.writeChunkDelayMs);
+			}
+		}
+	}
+
+	private writeChunk(data: Buffer): Promise<void> {
 		return new Promise<void>((resolve, reject) => {
 			let settled = false;
 			const cleanup = (): void => { this.port.off('error', onError); };

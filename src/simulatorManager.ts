@@ -141,7 +141,13 @@ export class SimulatorManager implements vscode.Disposable {
 			});
 			if (!baudRateText) return;
 
-			const transport = new UartTransport(port.info.path, Number(baudRateText.trim()));
+			const uartConfiguration = vscode.workspace.getConfiguration('elenixosToolkit');
+			const writeChunkSize = uartConfiguration.get<number>('ymodemWriteChunkSize', 16);
+			const writeChunkDelayMs = uartConfiguration.get<number>('ymodemWriteChunkDelayMs', 20);
+			const transport = new UartTransport(port.info.path, Number(baudRateText.trim()), {
+				writeChunkSize,
+				writeChunkDelayMs,
+			});
 			await vscode.window.withProgress(
 				{ location: vscode.ProgressLocation.Notification, title: `Sending with YMODEM over ${port.info.path}`, cancellable: false },
 				async (progress) => {

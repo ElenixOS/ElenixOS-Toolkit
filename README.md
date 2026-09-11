@@ -83,6 +83,12 @@ Previously selected files and folders are available from the YMODEM history
 list, where each entry shows its file name and full path. The Simulator is not
 used as the transport for this feature.
 
+The default UART pacing is conservative for receivers with small software
+input queues: 16-byte chunks with a 20 ms delay. Adjust
+`elenixosToolkit.ymodemWriteChunkSize` and
+`elenixosToolkit.ymodemWriteChunkDelayMs`; set both to `0` when the receiver
+has adequate buffering or hardware flow control.
+
 ## IPC format
 
 The compatibility IPC stream uses a 16-byte big-endian header:
