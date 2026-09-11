@@ -2,7 +2,7 @@
   "name": "elenixos-toolkit",
   "displayName": "ElenixOS-Toolkit",
   "description": "Development and debugging toolkit for ElenixOS",
-  "version": "0.0.3",
+  "version": "0.1.0",
   "publisher": "ElenixOS",
   "repository": {
     "type": "git",
