@@ -9,6 +9,7 @@ export interface EshTerminalSessionCallbacks {
 	onData: (data: Buffer) => void;
 	onError: (error: Error) => void;
 	onClosed: () => void;
+	onTransferBusy: (busy: boolean) => void;
 }
 
 /** Owns one ESH-over-UART connection and all listeners attached to it. */
@@ -17,8 +18,10 @@ export class EshTerminalSession {
 	private removeDataListener: (() => void) | undefined;
 	private removeErrorListener: (() => void) | undefined;
 	private removeCloseListener: (() => void) | undefined;
+	private removeExclusiveListener: (() => void) | undefined;
 	private operation: Promise<void> = Promise.resolve();
 	private connected = false;
+	private transferBusy = false;
 
 	constructor(private readonly callbacks: EshTerminalSessionCallbacks) {}
 
@@ -32,7 +35,7 @@ export class EshTerminalSession {
 		const transport = new UartTransport(connection.path, connection.baudRate, { writeChunkSize: 0 });
 		this.transport = transport;
 		this.removeDataListener = transport.onData((data) => {
-			if (this.transport === transport) {this.callbacks.onData(data);}
+			if (this.transport === transport && !this.transferBusy) {this.callbacks.onData(data);}
 		});
 		this.removeErrorListener = transport.onError((error) => {
 			if (this.transport !== transport) {return;}
@@ -43,6 +46,11 @@ export class EshTerminalSession {
 			if (this.transport !== transport) {return;}
 			this.callbacks.onClosed();
 			this.clearTransport(transport);
+		});
+		this.removeExclusiveListener = transport.onExclusive((busy) => {
+			if (this.transport !== transport) {return;}
+			this.transferBusy = busy;
+			this.callbacks.onTransferBusy(busy);
 		});
 
 		try {
@@ -62,10 +70,16 @@ export class EshTerminalSession {
 	write(data: string): Promise<void> {
 		const transport = this.transport;
 		if (!transport || !this.connected) {return Promise.reject(new Error('ESH terminal is not connected to a UART port.'));}
+		if (this.transferBusy) {return Promise.reject(new Error('ESH terminal input is disabled during the YMODEM transfer.'));}
 		/* Serialize writes so pasted commands and individual key events cannot
-		 * overtake one another on the serial stream. */
-		this.operation = this.operation.then(() => transport.write(Buffer.from(data, 'utf8')));
+		 * overtake one another on the serial stream. Recover the chain after a
+		 * rejected write so a transient transfer reservation cannot brick input. */
+		this.operation = this.operation.catch(() => undefined).then(() => transport.write(Buffer.from(data, 'utf8')));
 		return this.operation;
+	}
+
+	isTransferBusy(): boolean {
+		return this.transferBusy;
 	}
 
 	async close(): Promise<void> {
@@ -90,10 +104,16 @@ export class EshTerminalSession {
 		this.removeDataListener?.();
 		this.removeErrorListener?.();
 		this.removeCloseListener?.();
+		this.removeExclusiveListener?.();
 		this.removeDataListener = undefined;
 		this.removeErrorListener = undefined;
 		this.removeCloseListener = undefined;
+		this.removeExclusiveListener = undefined;
 		this.transport = undefined;
 		this.connected = false;
+		if (this.transferBusy) {
+			this.transferBusy = false;
+			this.callbacks.onTransferBusy(false);
+		}
 	}
 }

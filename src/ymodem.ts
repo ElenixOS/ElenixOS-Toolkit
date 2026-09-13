@@ -30,6 +30,8 @@ export interface YModemFile {
 export interface YModemTransport {
 	write(data: Buffer): Promise<void>;
 	onData(listener: (data: Buffer) => void): () => void;
+	/** Serialize the whole protocol session when the physical transport is shared. */
+	runExclusive?<T>(action: () => Promise<T>): Promise<T>;
 }
 
 export interface YModemProgress {
@@ -331,6 +333,13 @@ export class YModemSender {
 	}
 
 	async send(files: readonly YModemFile[], transport: YModemTransport, prepare?: () => Promise<void>): Promise<YModemTransferStats> {
+		if (transport.runExclusive) {
+			return transport.runExclusive(() => this.sendUnlocked(files, transport, prepare));
+		}
+		return this.sendUnlocked(files, transport, prepare);
+	}
+
+	private async sendUnlocked(files: readonly YModemFile[], transport: YModemTransport, prepare?: () => Promise<void>): Promise<YModemTransferStats> {
 		if (files.length === 0) {throw new Error('No files selected for YMODEM transfer.');}
 		this.options.control?.throwIfTerminated();
 		const queue = new ControlByteQueue(transport);
@@ -390,7 +399,8 @@ export class YModemSender {
 			 * packet.  CAN CAN is the standard YMODEM cancel sequence; Ctrl-C
 			 * is the ESH-compatible escape for a parser that has not yet
 			 * returned to packet-idle state. */
-			await transport.write(Buffer.from([YMODEM_CAN, YMODEM_CAN, 0x03])).catch(() => undefined);
+			await transport.write(Buffer.from([YMODEM_CAN, YMODEM_CAN])).catch(() => undefined);
+			await transport.write(Buffer.from([0x03])).catch(() => undefined);
 			throw error;
 		} finally {
 			queue.dispose();

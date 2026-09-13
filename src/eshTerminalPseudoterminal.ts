@@ -14,6 +14,7 @@ export class EshTerminalPseudoterminal implements vscode.Pseudoterminal, vscode.
 	private outputTimer: ReturnType<typeof setTimeout> | undefined;
 	private opened = false;
 	private disposed = false;
+	private transferBusy = false;
 
 	readonly onDidWrite = this.writeEmitter.event;
 
@@ -27,6 +28,12 @@ export class EshTerminalPseudoterminal implements vscode.Pseudoterminal, vscode.
 			onClosed: () => {
 				this.queueOutput(this.decoder.flush());
 				this.queueStatus('UART disconnected. Run “ElenixOS: Open ESH Terminal” to reconnect.');
+			},
+			onTransferBusy: (busy) => {
+				this.transferBusy = busy;
+				this.queueStatus(busy
+					? 'ESH input is temporarily disabled while a YMODEM transfer is active.'
+					: 'ESH input is enabled again.');
 			},
 		});
 	}
@@ -46,6 +53,7 @@ export class EshTerminalPseudoterminal implements vscode.Pseudoterminal, vscode.
 			this.queueStatus('Not connected to a UART port. Run “ElenixOS: Open ESH Terminal”.');
 			return;
 		}
+		if (this.transferBusy || this.session.isTransferBusy()) {return;}
 		void this.session.write(data).catch((error: unknown) => {
 			this.queueStatus(`UART write failed: ${error instanceof Error ? error.message : String(error)}`);
 		});

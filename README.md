@@ -92,6 +92,13 @@ the receiver's ACK. Adjust
 `elenixosToolkit.ymodemWriteChunkDelayMs`; set both to `0` when the receiver
 has adequate buffering or hardware flow control.
 
+The ESH terminal and YMODEM share one physical UART session inside Toolkit.
+Starting a transfer while the terminal is open does not require closing or
+reopening it. Toolkit temporarily disables terminal input and hides UART
+output while YMODEM owns the protocol, then restores the terminal
+automatically when the transfer finishes or fails. Input typed during this
+period is discarded rather than sent after the transfer.
+
 The device UART must use the same 921600 8N1 settings. Toolkit cannot change a
 target firmware UART configured at another rate; keep the setting synchronized
 before starting a transfer.
@@ -121,8 +128,10 @@ echo, and command execution, while VS Code handles ANSI/VT terminal rendering,
 scrollback, copy/paste, keyboard input, and resizing.
 
 Run `ElenixOS: Switch ESH Terminal Port` to reconnect the existing terminal to
-another device. Only one Toolkit feature may hold a given UART at a time, and
-closing the terminal or the extension releases the UART handle.
+another device. The ESH terminal and YMODEM can use the same UART session.
+While YMODEM is active, Toolkit disables terminal input until the transfer
+completes. Closing the terminal or the extension releases the shared UART
+handle.
 
 ## IPC format
 
