@@ -85,12 +85,12 @@ list, where each entry shows its file name and full path. The Simulator is not
 used as the transport for this feature.
 
 The default UART is 921600 baud, 8N1. YMODEM data packets use the standard 1K
-STX format. The host writes each complete packet without artificial chunk
-pacing and waits for the serial driver's drain completion before waiting for
-the receiver's ACK. Adjust
+STX format. For the software-queued receiver, the host writes 16-byte chunks
+with a 5 ms inter-chunk delay and waits for the serial driver's drain
+completion before waiting for the receiver's ACK. Adjust
 `elenixosToolkit.ymodemWriteChunkSize` and
-`elenixosToolkit.ymodemWriteChunkDelayMs`; set both to `0` when the receiver
-has adequate buffering or hardware flow control.
+`elenixosToolkit.ymodemWriteChunkDelayMs`; set both to `0` only when the
+receiver has adequate buffering or hardware flow control.
 
 The ESH terminal and YMODEM share one physical UART session inside Toolkit.
 Starting a transfer while the terminal is open does not require closing or

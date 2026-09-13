@@ -7,6 +7,11 @@ import type { YModemTransport } from './ymodem';
 
 const ESH_CTRL_C = 0x03;
 const ESH_YMODEM_CANCEL = 0x18;
+/* A cancelled host transfer can leave the device parser halfway through a
+ * 1K packet.  CAN bytes are deliberately treated as packet data in that
+ * state, so send enough CAN bytes to finish the largest packet and one more
+ * to abort it before using Ctrl-C to redraw the ESH prompt. */
+const ESH_YMODEM_MAX_PACKET_SIZE = 1029;
 const ESH_UART_OPEN_SETTLE_DELAY_MS = 300;
 const ESH_PROMPT_RETRY_DELAY_MS = 250;
 const ESH_PROMPT_TIMEOUT_MS = 5000;
@@ -14,8 +19,8 @@ const ESH_PROMPT_TIMEOUT_MS = 5000;
  * queue. These remain configurable for receivers with hardware flow control
  * or a larger input queue. */
 export const DEFAULT_UART_BAUD_RATE = 921600;
-export const DEFAULT_YMODEM_UART_CHUNK_SIZE = 0;
-export const DEFAULT_YMODEM_UART_CHUNK_DELAY_MS = 0;
+export const DEFAULT_YMODEM_UART_CHUNK_SIZE = 16;
+export const DEFAULT_YMODEM_UART_CHUNK_DELAY_MS = 5;
 const UART_LOCK_DIRECTORY = path.join(os.tmpdir(), 'elenixos-toolkit-uart-locks');
 
 export type UartPortInfo = Awaited<ReturnType<typeof SerialPort.list>>[number];
@@ -467,7 +472,15 @@ async function sendEmptyEshCommand(transport: YModemTransport): Promise<void> {
 	}, ESH_PROMPT_TIMEOUT_MS);
 
 	try {
-		const reset = Buffer.from([ESH_YMODEM_CANCEL, ESH_YMODEM_CANCEL, ESH_CTRL_C]);
+		const reset = Buffer.alloc(ESH_YMODEM_MAX_PACKET_SIZE + 1, ESH_YMODEM_CANCEL);
+		reset[reset.length - 1] = ESH_CTRL_C;
+		/* A target that is already at the ESH prompt only needs Ctrl-C.  Avoid
+		 * writing a full recovery buffer into the command-mode UART, because a
+		 * software-queued receiver may drop the final Ctrl-C behind that burst. */
+		await transport.write(Buffer.from([ESH_CTRL_C]));
+		if (!output.includes('ESH> ')) {
+			await Promise.race([prompt, delay(ESH_PROMPT_RETRY_DELAY_MS)]);
+		}
 		const deadline = Date.now() + ESH_PROMPT_TIMEOUT_MS;
 		while (Date.now() < deadline && !output.includes('ESH> ')) {
 			await transport.write(reset);
