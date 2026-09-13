@@ -6,8 +6,15 @@ import * as vscode from 'vscode';
 import { createSimulatorIpcSocketPath } from './debugConfiguration';
 import { readReadyFile, waitForReadyFile, type SimulatorReadyInfo } from './ipc';
 import { SimulatorWebview } from './simulatorWebview';
-import { collectYModemFiles, YModemSender } from './ymodem';
-import { listUartPorts, sendEshYModemReceiveCommand, UartTransport } from './uart';
+import { collectYModemFiles, YModemSender, YModemTransferControl } from './ymodem';
+import {
+	DEFAULT_UART_BAUD_RATE,
+	DEFAULT_YMODEM_UART_CHUNK_DELAY_MS,
+	DEFAULT_YMODEM_UART_CHUNK_SIZE,
+	listUartPorts,
+	sendEshYModemReceiveCommand,
+	UartTransport,
+} from './uart';
 
 const YMODEM_HISTORY_KEY = 'elenixosToolkit.ymodemHistory';
 const YMODEM_HISTORY_LIMIT = 50;
@@ -34,11 +41,27 @@ interface ActiveSimulator {
 	process?: ChildProcess;
 }
 
+function formatTransferRate(bytesPerSecond: number): string {
+	if (!Number.isFinite(bytesPerSecond) || bytesPerSecond < 1024) {
+		return `${Math.max(0, bytesPerSecond).toFixed(0)} B/s`;
+	}
+	return `${(bytesPerSecond / 1024).toFixed(1)} KB/s`;
+}
+
 export class SimulatorManager implements vscode.Disposable {
 	private active: ActiveSimulator | undefined;
 	private cleanupBarrier: Promise<void> = Promise.resolve();
+	private ymodemControl: YModemTransferControl | undefined;
+	private readonly ymodemPauseItem: vscode.StatusBarItem;
+	private readonly ymodemTerminateItem: vscode.StatusBarItem;
 
-	constructor(private readonly webview: SimulatorWebview, private readonly globalState: vscode.Memento) {}
+	constructor(private readonly webview: SimulatorWebview, private readonly globalState: vscode.Memento) {
+		this.ymodemPauseItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+		this.ymodemPauseItem.command = 'elenixos-toolkit.toggleYModemPause';
+		this.ymodemTerminateItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
+		this.ymodemTerminateItem.command = 'elenixos-toolkit.terminateYModem';
+		this.updateYModemControls();
+	}
 
 	async openManually(): Promise<void> {
 		await this.cleanupBarrier;
@@ -104,9 +127,14 @@ export class SimulatorManager implements vscode.Disposable {
 	}
 
 	async sendYModem(): Promise<void> {
+		if (this.ymodemControl) {
+			void vscode.window.showWarningMessage('A YMODEM transfer is already active.');
+			return;
+		}
 		const sourcePaths = await this.selectYModemSources();
 		if (!sourcePaths || sourcePaths.length === 0) {return;}
 
+		let control: YModemTransferControl | undefined;
 		try {
 			const files = await collectYModemFiles(sourcePaths);
 			const destinationPath = await this.selectYModemDestination(sourcePaths, files);
@@ -129,7 +157,7 @@ export class SimulatorManager implements vscode.Disposable {
 			);
 			if (!port) {return;}
 
-			const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', 115200);
+			const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', DEFAULT_UART_BAUD_RATE);
 			const baudRateText = await vscode.window.showInputBox({
 				prompt: 'UART baud rate (8 data bits, no parity, 1 stop bit)',
 				value: String(configuredBaudRate),
@@ -142,36 +170,68 @@ export class SimulatorManager implements vscode.Disposable {
 			if (!baudRateText) {return;}
 
 			const uartConfiguration = vscode.workspace.getConfiguration('elenixosToolkit');
-			const writeChunkSize = uartConfiguration.get<number>('ymodemWriteChunkSize', 16);
-			const writeChunkDelayMs = uartConfiguration.get<number>('ymodemWriteChunkDelayMs', 20);
+			const writeChunkSize = uartConfiguration.get<number>('ymodemWriteChunkSize', DEFAULT_YMODEM_UART_CHUNK_SIZE);
+			const writeChunkDelayMs = uartConfiguration.get<number>('ymodemWriteChunkDelayMs', DEFAULT_YMODEM_UART_CHUNK_DELAY_MS);
 			const transport = new UartTransport(port.info.path, Number(baudRateText.trim()), {
 				writeChunkSize,
 				writeChunkDelayMs,
 			});
+			control = new YModemTransferControl();
+			this.ymodemControl = control;
+			this.updateYModemControls();
 			await vscode.window.withProgress(
-				{ location: vscode.ProgressLocation.Notification, title: `Sending with YMODEM over ${port.info.path}`, cancellable: false },
-				async (progress) => {
-					await transport.open();
+				{ location: vscode.ProgressLocation.Notification, title: `Sending with YMODEM over ${port.info.path}`, cancellable: true },
+				async (progress, token) => {
+					const cancellation = token.onCancellationRequested(() => control?.terminate());
 					try {
+						await transport.open();
 						const sender = new YModemSender({
-							onProgress: ({ file, fileIndex, fileCount, bytesSent, totalBytes }) => {
+							control,
+							onProgress: ({ file, fileIndex, fileCount, bytesSent, totalBytes, bytesPerSecond }) => {
 								const percent = totalBytes === 0 ? 100 : Math.floor((bytesSent * 100) / totalBytes);
-								progress.report({ message: `${fileIndex + 1}/${fileCount} ${file.transferName} (${percent}%)` });
+								progress.report({
+									message: `${fileIndex + 1}/${fileCount} ${file.transferName} (${percent}%, ${formatTransferRate(bytesPerSecond)})`,
+								});
 							},
 						});
-						await sender.send(files, transport, () => sendEshYModemReceiveCommand(transport, destinationPath));
+						const stats = await sender.send(files, transport, () => sendEshYModemReceiveCommand(transport, destinationPath));
+						if (!control?.isTerminated) {
+							void vscode.window.showInformationMessage(
+								`YMODEM complete: ${stats.totalBytes} bytes in ${stats.elapsedMs} ms (${formatTransferRate(stats.bytesPerSecond)}), ${stats.blockCount} blocks, ${stats.retransmissionCount} retransmissions, ${stats.crcErrorCount} data-block NAKs, ${stats.timeoutCount} timeouts`,
+							);
+						}
 					}
 					finally {
+						cancellation.dispose();
 						await transport.close();
 					}
 				},
 			);
-			void vscode.window.showInformationMessage(`YMODEM transfer complete (${files.length} file${files.length === 1 ? '' : 's'}).`);
 		}
 		catch (error) {
+			if (control?.isTerminated) {
+				void vscode.window.showInformationMessage('YMODEM transfer terminated.');
+				return;
+			}
 			const message = error instanceof Error ? error.message : String(error);
 			void vscode.window.showErrorMessage(`YMODEM transfer failed: ${message}`);
 		}
+		finally {
+			if (control && this.ymodemControl === control) {
+				this.ymodemControl = undefined;
+				this.updateYModemControls();
+			}
+		}
+	}
+
+	toggleYModemPause(): void {
+		if (!this.ymodemControl) {return;}
+		this.ymodemControl.togglePause();
+		this.updateYModemControls();
+	}
+
+	terminateYModem(): void {
+		this.ymodemControl?.terminate();
 	}
 
 	private async selectYModemSources(): Promise<string[] | undefined> {
@@ -277,10 +337,31 @@ export class SimulatorManager implements vscode.Disposable {
 	}
 
 	dispose(): void {
+		this.ymodemControl?.terminate();
+		this.ymodemPauseItem.dispose();
+		this.ymodemTerminateItem.dispose();
 		/* Keep the WebviewPanel alive for VS Code's panel serializer.  This lets
 		 * the next Extension Host activation reclaim the same Simulator window
 		 * instead of opening a duplicate panel. */
 		if (this.active) {void this.stopActive(this.active);}
+	}
+
+	private updateYModemControls(): void {
+		const control = this.ymodemControl;
+		if (!control) {
+			this.ymodemPauseItem.hide();
+			this.ymodemTerminateItem.hide();
+			void vscode.commands.executeCommand('setContext', 'elenixosToolkit.ymodemActive', false);
+			return;
+		}
+
+		this.ymodemPauseItem.text = control.isPaused ? '$(debug-continue) Resume YMODEM' : '$(debug-pause) Pause YMODEM';
+		this.ymodemPauseItem.tooltip = control.isPaused ? 'Resume the YMODEM transfer' : 'Pause the YMODEM transfer';
+		this.ymodemTerminateItem.text = '$(debug-stop) Terminate YMODEM';
+		this.ymodemTerminateItem.tooltip = 'Terminate the YMODEM transfer';
+		this.ymodemPauseItem.show();
+		this.ymodemTerminateItem.show();
+		void vscode.commands.executeCommand('setContext', 'elenixosToolkit.ymodemActive', true);
 	}
 
 	private async waitAndConnect(active: ActiveSimulator): Promise<void> {

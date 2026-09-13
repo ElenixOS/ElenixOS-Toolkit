@@ -14,8 +14,11 @@ const PACKET_DATA_SIZE = 1024;
 const PACKET_SIZE = PACKET_DATA_SIZE + 5;
 const HEADER_PACKET_SIZE = HEADER_DATA_SIZE + 5;
 const PADDING = 0x1a;
-const DEFAULT_TIMEOUT_MS = 3000;
+/* Flash-backed receivers may pause while committing a packet. Match the
+ * receiver-side transfer tools and allow that pause before retrying. */
+const DEFAULT_TIMEOUT_MS = 30000;
 const DEFAULT_MAX_RETRIES = 10;
+const MAX_CONTROL_QUEUE_BYTES = 4096;
 const UINT32_MAX = 0xffffffff;
 
 export interface YModemFile {
@@ -35,11 +38,30 @@ export interface YModemProgress {
 	readonly fileCount: number;
 	readonly bytesSent: number;
 	readonly totalBytes: number;
+	readonly elapsedMs: number;
+	readonly bytesPerSecond: number;
+	readonly blockCount: number;
+	readonly retransmissionCount: number;
+	/** Data-block NAKs; standard YMODEM does not encode the receiver's reason. */
+	readonly crcErrorCount: number;
+	readonly timeoutCount: number;
+}
+
+export interface YModemTransferStats {
+	readonly totalBytes: number;
+	readonly elapsedMs: number;
+	readonly bytesPerSecond: number;
+	readonly blockCount: number;
+	readonly retransmissionCount: number;
+	readonly crcErrorCount: number;
+	readonly timeoutCount: number;
+	readonly nakCount: number;
 }
 
 export interface YModemSenderOptions {
 	readonly timeoutMs?: number;
 	readonly maxRetries?: number;
+	readonly control?: YModemTransferControl;
 	onProgress?: (progress: YModemProgress) => void;
 }
 
@@ -109,6 +131,10 @@ function crc16(data: Uint8Array): number {
 	return crc;
 }
 
+function isControlByteTimeout(error: unknown): boolean {
+	return error instanceof Error && error.message.startsWith('Timed out waiting for YMODEM control byte');
+}
+
 function createPacket(startByte: number, block: number, data: Uint8Array, dataSize: number): Buffer {
 	const packet = Buffer.alloc(dataSize + 5, startByte === YMODEM_SOH ? 0 : PADDING);
 	packet[0] = startByte;
@@ -141,6 +167,7 @@ class ControlByteQueue {
 		readonly resolve: (value: number) => void;
 		readonly reject: (error: Error) => void;
 		readonly timer: NodeJS.Timeout;
+		readonly cleanup: () => void;
 	}> = [];
 
 	constructor(transport: YModemTransport) {
@@ -149,24 +176,42 @@ class ControlByteQueue {
 
 	private readonly unsubscribe: () => void;
 
-	waitFor(accepted: readonly number[], timeoutMs: number): Promise<number> {
+	waitFor(accepted: readonly number[], timeoutMs: number, signal?: AbortSignal): Promise<number> {
+		if (signal?.aborted) {return Promise.reject(new Error('YMODEM transfer terminated by user.'));}
 		const immediate = this.take(accepted);
 		if (immediate !== undefined) {return Promise.resolve(immediate);}
 
 		return new Promise<number>((resolve, reject) => {
+			let waiter: (typeof this.waiters)[number];
+			const cleanup = (): void => {
+				clearTimeout(waiter.timer);
+				if (signal) {signal.removeEventListener('abort', onAbort);}
+			};
+			const onAbort = (): void => {
+				const index = this.waiters.indexOf(waiter);
+				if (index < 0) {return;}
+				this.waiters.splice(index, 1);
+				cleanup();
+				reject(new Error('YMODEM transfer terminated by user.'));
+			};
 			const timer = setTimeout(() => {
 				const index = this.waiters.findIndex((waiter) => waiter.timer === timer);
-				if (index >= 0) {this.waiters.splice(index, 1);}
+				if (index >= 0) {
+					this.waiters.splice(index, 1);
+					cleanup();
+				}
 				reject(new Error(`Timed out waiting for YMODEM control byte (${accepted.map((value) => `0x${value.toString(16)}`).join(', ')})`));
 			}, timeoutMs);
-			this.waiters.push({ accepted, resolve, reject, timer });
+			waiter = { accepted, resolve, reject, timer, cleanup };
+			this.waiters.push(waiter);
+			if (signal) {signal.addEventListener('abort', onAbort, { once: true });}
 		});
 	}
 
 	dispose(): void {
 		this.unsubscribe();
 		for (const waiter of this.waiters) {
-			clearTimeout(waiter.timer);
+			waiter.cleanup();
 			waiter.reject(new Error('YMODEM transport closed'));
 		}
 		this.waiters.length = 0;
@@ -174,7 +219,15 @@ class ControlByteQueue {
 	}
 
 	private push(data: Buffer): void {
-		for (const value of data) {this.bytes.push(value);}
+		if (data.length >= MAX_CONTROL_QUEUE_BYTES) {
+			this.bytes.length = 0;
+			for (const value of data.subarray(data.length - MAX_CONTROL_QUEUE_BYTES)) {this.bytes.push(value);}
+		} else {
+			for (const value of data) {this.bytes.push(value);}
+			if (this.bytes.length > MAX_CONTROL_QUEUE_BYTES) {
+				this.bytes.splice(0, this.bytes.length - MAX_CONTROL_QUEUE_BYTES);
+			}
+		}
 		this.resolveWaiter();
 	}
 
@@ -186,7 +239,7 @@ class ControlByteQueue {
 		const value = this.bytes[index];
 		this.bytes.splice(0, index + 1);
 		this.waiters.shift();
-		clearTimeout(waiter.timer);
+		waiter.cleanup();
 		waiter.resolve(value);
 	}
 
@@ -203,6 +256,71 @@ class ControlByteQueue {
 	}
 }
 
+export class YModemTransferControl {
+	private readonly abortController = new AbortController();
+	private readonly pauseWaiters = new Set<() => void>();
+	private paused = false;
+	private terminated = false;
+
+	get signal(): AbortSignal {
+		return this.abortController.signal;
+	}
+
+	get isPaused(): boolean {
+		return this.paused;
+	}
+
+	get isTerminated(): boolean {
+		return this.terminated;
+	}
+
+	pause(): void {
+		if (!this.terminated) {this.paused = true;}
+	}
+
+	resume(): void {
+		if (this.terminated) {return;}
+		this.paused = false;
+		for (const resolve of this.pauseWaiters) {resolve();}
+		this.pauseWaiters.clear();
+	}
+
+	togglePause(): void {
+		if (this.isPaused) {this.resume();}
+		else {this.pause();}
+	}
+
+	terminate(): void {
+		if (this.terminated) {return;}
+		this.terminated = true;
+		this.paused = false;
+		this.abortController.abort();
+	}
+
+	throwIfTerminated(): void {
+		if (this.terminated) {throw new Error('YMODEM transfer terminated by user.');}
+	}
+
+	async waitIfResumed(): Promise<void> {
+		this.throwIfTerminated();
+		if (!this.paused) {return;}
+		await new Promise<void>((resolve, reject) => {
+			const onAbort = (): void => {
+				this.pauseWaiters.delete(onResume);
+				reject(new Error('YMODEM transfer terminated by user.'));
+			};
+			const onResume = (): void => {
+				this.pauseWaiters.delete(onResume);
+				this.signal.removeEventListener('abort', onAbort);
+				resolve();
+			};
+			this.pauseWaiters.add(onResume);
+			this.signal.addEventListener('abort', onAbort, { once: true });
+		});
+		this.throwIfTerminated();
+	}
+}
+
 export class YModemSender {
 	private readonly timeoutMs: number;
 	private readonly maxRetries: number;
@@ -212,34 +330,67 @@ export class YModemSender {
 		this.maxRetries = options.maxRetries ?? DEFAULT_MAX_RETRIES;
 	}
 
-	async send(files: readonly YModemFile[], transport: YModemTransport, prepare?: () => Promise<void>): Promise<void> {
+	async send(files: readonly YModemFile[], transport: YModemTransport, prepare?: () => Promise<void>): Promise<YModemTransferStats> {
 		if (files.length === 0) {throw new Error('No files selected for YMODEM transfer.');}
+		this.options.control?.throwIfTerminated();
 		const queue = new ControlByteQueue(transport);
 		try {
 			queue.clear();
 			await prepare?.();
-			await queue.waitFor([YMODEM_CRC, YMODEM_NAK], this.timeoutMs);
+			/* The automatic ESH preparation echoes Ctrl-U as 0x15.  When a
+			 * preparation callback is used, only accept the receiver's CRC
+			 * handshake here so that the echoed byte cannot be mistaken for NAK. */
+			const initialControlBytes = prepare ? [YMODEM_CRC, YMODEM_CAN] : [YMODEM_CRC, YMODEM_NAK, YMODEM_CAN];
+			const initialResponse = await queue.waitFor(initialControlBytes, this.timeoutMs, this.options.control?.signal);
+			if (initialResponse === YMODEM_CAN) {throw new Error('YMODEM receiver cancelled transfer.');}
 			const totalBytes = files.reduce((total, file) => total + file.size, 0);
 			let sentBytes = 0;
+			const startedAt = Date.now();
+			const stats = {
+				blockCount: 0,
+				retransmissionCount: 0,
+				crcErrorCount: 0,
+				timeoutCount: 0,
+				nakCount: 0,
+			};
 
 			for (let index = 0; index < files.length; index++) {
 				const file = files[index];
-				await this.sendPacketWithAck(createHeader(file), transport, queue);
-				await queue.waitFor([YMODEM_CRC, YMODEM_NAK], this.timeoutMs);
-				sentBytes = await this.sendFile(file, index, files.length, totalBytes, sentBytes, transport, queue);
-				await this.sendEot(transport, queue);
+				await this.options.control?.waitIfResumed();
+				await this.sendPacketWithAck(createHeader(file), transport, queue, `header for ${file.transferName}`, stats);
+				const nextResponse = await queue.waitFor([YMODEM_CRC, YMODEM_NAK, YMODEM_CAN], this.timeoutMs, this.options.control?.signal);
+				if (nextResponse === YMODEM_CAN) {throw new Error('YMODEM receiver cancelled transfer.');}
+				sentBytes = await this.sendFile(file, index, files.length, totalBytes, sentBytes, transport, queue, startedAt, stats);
+				await this.sendEot(transport, queue, stats);
 				if (index + 1 < files.length) {
-					await queue.waitFor([YMODEM_CRC, YMODEM_NAK], this.timeoutMs);
+					const nextResponse = await queue.waitFor([YMODEM_CRC, YMODEM_NAK, YMODEM_CAN], this.timeoutMs, this.options.control?.signal);
+					if (nextResponse === YMODEM_CAN) {throw new Error('YMODEM receiver cancelled transfer.');}
 				} else if (files.length === 1 && await this.waitForOptionalEndSignal(queue)) {
 					/* Simple ESH receivers finish after the EOT ACK. Standard YMODEM
 					 * receivers may request the final empty header instead. */
-					await this.sendPacketWithAck(createHeader(), transport, queue);
+					await this.options.control?.waitIfResumed();
+					await this.sendPacketWithAck(createHeader(), transport, queue, 'end-of-batch header', stats);
 				}
 			}
 
-			if (files.length > 1) {await this.sendPacketWithAck(createHeader(), transport, queue);}
+			if (files.length > 1) {
+				await this.options.control?.waitIfResumed();
+				await this.sendPacketWithAck(createHeader(), transport, queue, 'end-of-batch header', stats);
+			}
+
+			const elapsedMs = Math.max(1, Date.now() - startedAt);
+			return {
+				totalBytes,
+				elapsedMs,
+				bytesPerSecond: sentBytes * 1000 / elapsedMs,
+				...stats,
+			};
 		} catch (error) {
-			await transport.write(Buffer.from([YMODEM_CAN, YMODEM_CAN])).catch(() => undefined);
+			/* Abort even if the receiver is currently assembling a partial
+			 * packet.  CAN CAN is the standard YMODEM cancel sequence; Ctrl-C
+			 * is the ESH-compatible escape for a parser that has not yet
+			 * returned to packet-idle state. */
+			await transport.write(Buffer.from([YMODEM_CAN, YMODEM_CAN, 0x03])).catch(() => undefined);
 			throw error;
 		} finally {
 			queue.dispose();
@@ -254,19 +405,42 @@ export class YModemSender {
 		sentBytes: number,
 		transport: YModemTransport,
 		queue: ControlByteQueue,
+		startedAt: number,
+		stats: { blockCount: number; retransmissionCount: number; crcErrorCount: number; timeoutCount: number; nakCount: number },
 	): Promise<number> {
 		const handle = await fs.promises.open(file.sourcePath, 'r');
 		let offset = 0;
 		let block = 1;
 		try {
 			while (offset < file.size) {
+				await this.options.control?.waitIfResumed();
 				const buffer = Buffer.alloc(PACKET_DATA_SIZE);
 				const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
 				if (bytesRead === 0) {throw new Error(`File changed while sending: ${file.sourcePath}`);}
-				await this.sendPacketWithAck(createPacket(YMODEM_STX, block, buffer.subarray(0, bytesRead), PACKET_DATA_SIZE), transport, queue);
+				await this.sendPacketWithAck(
+					createPacket(YMODEM_STX, block, buffer.subarray(0, bytesRead), PACKET_DATA_SIZE),
+						transport,
+						queue,
+					`data block ${block} for ${file.transferName}`,
+					stats,
+					);
+				stats.blockCount++;
 				offset += bytesRead;
 				sentBytes += bytesRead;
-				this.options.onProgress?.({ file, fileIndex, fileCount, bytesSent: sentBytes, totalBytes });
+				const elapsedMs = Math.max(1, Date.now() - startedAt);
+				this.options.onProgress?.({
+					file,
+					fileIndex,
+					fileCount,
+					bytesSent: sentBytes,
+					totalBytes,
+					elapsedMs,
+					bytesPerSecond: sentBytes * 1000 / elapsedMs,
+					blockCount: stats.blockCount,
+					retransmissionCount: stats.retransmissionCount,
+					crcErrorCount: stats.crcErrorCount,
+					timeoutCount: stats.timeoutCount,
+				});
 				block = (block + 1) & 0xff;
 			}
 			return sentBytes;
@@ -275,33 +449,76 @@ export class YModemSender {
 		}
 	}
 
-	private async sendPacketWithAck(packet: Buffer, transport: YModemTransport, queue: ControlByteQueue): Promise<void> {
+	private async sendPacketWithAck(
+		packet: Buffer,
+		transport: YModemTransport,
+		queue: ControlByteQueue,
+		description: string,
+		stats: { blockCount: number; retransmissionCount: number; crcErrorCount: number; timeoutCount: number; nakCount: number },
+	): Promise<void> {
+		let lastResult = 'timeout';
 		for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+			await this.options.control?.waitIfResumed();
+			if (attempt > 0) {stats.retransmissionCount++;}
 			await transport.write(packet);
-			const response = await queue.waitFor([YMODEM_ACK, YMODEM_NAK], this.timeoutMs);
-			if (response === YMODEM_ACK) {return;}
+			try {
+				const response = await queue.waitFor([YMODEM_ACK, YMODEM_NAK, YMODEM_CAN], this.timeoutMs, this.options.control?.signal);
+				if (response === YMODEM_ACK) {return;}
+				if (response === YMODEM_CAN) {throw new Error('YMODEM receiver cancelled transfer.');}
+				lastResult = 'NAK';
+				stats.nakCount++;
+				if (packet[0] === YMODEM_STX) {stats.crcErrorCount++;}
+			}
+			catch (error) {
+				if (!isControlByteTimeout(error)) {throw error;}
+				lastResult = 'timeout';
+				stats.timeoutCount++;
+			}
 		}
-		throw new Error('YMODEM receiver did not acknowledge the packet.');
+		throw new Error(`YMODEM receiver did not acknowledge ${description} after ${this.maxRetries} attempts (last result: ${lastResult}).`);
 	}
 
-	private async sendEot(transport: YModemTransport, queue: ControlByteQueue): Promise<void> {
+	private async sendEot(
+		transport: YModemTransport,
+		queue: ControlByteQueue,
+		stats: { blockCount: number; retransmissionCount: number; crcErrorCount: number; timeoutCount: number; nakCount: number },
+	): Promise<void> {
 		for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+			await this.options.control?.waitIfResumed();
+			if (attempt > 0) {stats.retransmissionCount++;}
 			await transport.write(Buffer.from([YMODEM_EOT]));
-			const response = await queue.waitFor([YMODEM_ACK, YMODEM_NAK], this.timeoutMs);
-			if (response === YMODEM_ACK) {return;}
+			try {
+				const response = await queue.waitFor([YMODEM_ACK, YMODEM_NAK, YMODEM_CAN], this.timeoutMs, this.options.control?.signal);
+				if (response === YMODEM_ACK) {return;}
+				if (response === YMODEM_CAN) {throw new Error('YMODEM receiver cancelled transfer.');}
+				stats.nakCount++;
+			}
+			catch (error) {
+				if (!isControlByteTimeout(error)) {throw error;}
+				stats.timeoutCount++;
+			}
+			await this.options.control?.waitIfResumed();
 			await transport.write(Buffer.from([YMODEM_EOT]));
-			const secondResponse = await queue.waitFor([YMODEM_ACK, YMODEM_NAK], this.timeoutMs);
-			if (secondResponse === YMODEM_ACK) {return;}
+			try {
+				const secondResponse = await queue.waitFor([YMODEM_ACK, YMODEM_NAK, YMODEM_CAN], this.timeoutMs, this.options.control?.signal);
+				if (secondResponse === YMODEM_ACK) {return;}
+				if (secondResponse === YMODEM_CAN) {throw new Error('YMODEM receiver cancelled transfer.');}
+				stats.nakCount++;
+			}
+			catch (error) {
+				if (!isControlByteTimeout(error)) {throw error;}
+				stats.timeoutCount++;
+			}
 		}
 		throw new Error('YMODEM receiver did not finish the file.');
 	}
 
 	private async waitForOptionalEndSignal(queue: ControlByteQueue): Promise<boolean> {
 		try {
-			await queue.waitFor([YMODEM_CRC, YMODEM_NAK], Math.min(this.timeoutMs, 250));
+			await queue.waitFor([YMODEM_CRC, YMODEM_NAK], Math.min(this.timeoutMs, 250), this.options.control?.signal);
 			return true;
-		}
-		catch {
+		} catch (error) {
+			if (!isControlByteTimeout(error)) {throw error;}
 			return false;
 		}
 	}

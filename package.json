@@ -54,6 +54,16 @@
         "title": "ElenixOS: Send File or Folder with YMODEM (UART)"
       },
       {
+        "command": "elenixos-toolkit.toggleYModemPause",
+        "title": "ElenixOS: Pause/Resume YMODEM Transfer",
+        "enablement": "elenixosToolkit.ymodemActive"
+      },
+      {
+        "command": "elenixos-toolkit.terminateYModem",
+        "title": "ElenixOS: Terminate YMODEM Transfer",
+        "enablement": "elenixosToolkit.ymodemActive"
+      },
+      {
         "command": "elenixos-toolkit.openEshTerminal",
         "title": "ElenixOS: Open ESH Terminal"
       },
@@ -71,20 +81,20 @@
         },
         "elenixosToolkit.uartBaudRate": {
           "type": "number",
-          "default": 115200,
+          "default": 921600,
           "minimum": 1,
           "maximum": 4000000,
           "description": "Default UART baud rate used by the ElenixOS ESH Terminal and YMODEM transfer."
         },
         "elenixosToolkit.ymodemWriteChunkSize": {
           "type": "integer",
-          "default": 16,
+          "default": 0,
           "minimum": 0,
           "description": "Maximum bytes written at once for each YMODEM UART chunk. Use 0 for a receiver with adequate buffering or hardware flow control."
         },
         "elenixosToolkit.ymodemWriteChunkDelayMs": {
           "type": "integer",
-          "default": 20,
+          "default": 0,
           "minimum": 0,
           "description": "Delay in milliseconds between YMODEM UART chunks. Set to 0 when chunk pacing is not needed."
         }
@@ -99,6 +109,8 @@
     "watch:tsc": "tsc --noEmit --watch --project tsconfig.json",
     "package": "npm run check-types && npm run lint && node esbuild.js --production",
     "compile-tests": "tsc -p . --outDir out",
+    "test:ymodem": "npm run compile-tests && node --test out/test/ymodem.test.js",
+    "benchmark:ymodem": "npm run compile-tests && node out/test/ymodem.benchmark.js",
     "watch-tests": "tsc -p . -w --outDir out",
     "pretest": "npm run compile-tests && npm run compile && npm run lint",
     "check-types": "tsc --noEmit",

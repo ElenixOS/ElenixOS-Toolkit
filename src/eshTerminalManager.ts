@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { EshTerminalConnection } from './eshTerminalSession';
 import { EshTerminalPseudoterminal } from './eshTerminalPseudoterminal';
-import { listUartPorts } from './uart';
+import { DEFAULT_UART_BAUD_RATE, listUartPorts } from './uart';
 
 interface EshPortPick extends vscode.QuickPickItem {
 	path: string;
@@ -115,7 +115,7 @@ export class EshTerminalManager implements vscode.Disposable {
 		})), { placeHolder: 'Select the UART connected to the ElenixOS device' });
 		if (!selected) {return undefined;}
 
-		const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', 115200);
+		const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', DEFAULT_UART_BAUD_RATE);
 		const baudRateText = await vscode.window.showInputBox({
 			prompt: 'ESH UART baud rate (8 data bits, no parity, 1 stop bit)',
 			value: String(configuredBaudRate),

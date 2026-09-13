@@ -28,6 +28,8 @@ export function activate(context: vscode.ExtensionContext): void {
 		webviewSerializer,
 		vscode.commands.registerCommand('elenixos-toolkit.openSimulator', () => manager.openManually()),
 		vscode.commands.registerCommand('elenixos-toolkit.sendYModem', () => manager.sendYModem()),
+		vscode.commands.registerCommand('elenixos-toolkit.toggleYModemPause', () => manager.toggleYModemPause()),
+		vscode.commands.registerCommand('elenixos-toolkit.terminateYModem', () => manager.terminateYModem()),
 		vscode.commands.registerCommand('elenixos-toolkit.openEshTerminal', () => eshTerminal.open()),
 		vscode.commands.registerCommand('elenixos-toolkit.switchEshTerminalPort', () => eshTerminal.switchPort()),
 		vscode.commands.registerCommand('elenixos-toolkit.helloWorld', () => vscode.window.showInformationMessage('ElenixOS-Toolkit is ready.')),

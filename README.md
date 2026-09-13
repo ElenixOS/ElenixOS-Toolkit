@@ -84,17 +84,38 @@ Previously selected files and folders are available from the YMODEM history
 list, where each entry shows its file name and full path. The Simulator is not
 used as the transport for this feature.
 
-The default UART pacing is conservative for receivers with small software
-input queues: 16-byte chunks with a 20 ms delay. Adjust
+The default UART is 921600 baud, 8N1. YMODEM data packets use the standard 1K
+STX format. The host writes each complete packet without artificial chunk
+pacing and waits for the serial driver's drain completion before waiting for
+the receiver's ACK. Adjust
 `elenixosToolkit.ymodemWriteChunkSize` and
 `elenixosToolkit.ymodemWriteChunkDelayMs`; set both to `0` when the receiver
 has adequate buffering or hardware flow control.
+
+The device UART must use the same 921600 8N1 settings. Toolkit cannot change a
+target firmware UART configured at another rate; keep the setting synchronized
+before starting a transfer.
+
+The YMODEM progress notification shows the cumulative transfer rate and
+automatically formats it as `B/s` or `KB/s`.
+
+On completion, Toolkit reports the file size, elapsed time, effective rate,
+data-block count, retransmissions, data-block NAKs, and timeouts. A standard
+YMODEM NAK has no reason code, so a data-block NAK is a CRC/block-validation
+rejection counter rather than proof of a CRC-only error.
+
+While a transfer is active, the status bar provides Pause/Resume and
+Terminate controls. Pause takes effect at the next packet boundary; Terminate
+cancels the YMODEM session and releases the UART.
+
+Toolkit does not query or estimate device filesystem capacity before sending;
+the receiver determines whether the destination has enough space.
 
 ## ESH Serial Terminal
 
 Connect the target device's debug UART and run `ElenixOS: Open ESH Terminal`
 from the Command Palette. Toolkit lists the available UART ports and uses
-`elenixosToolkit.uartBaudRate` (115200 by default). The terminal is a native
+`elenixosToolkit.uartBaudRate` (921600 by default). The terminal is a native
 VS Code pseudoterminal: ESH owns command editing, history, cursor movement,
 echo, and command execution, while VS Code handles ANSI/VT terminal rendering,
 scrollback, copy/paste, keyboard input, and resizing.
@@ -126,6 +147,8 @@ frames instead of accumulating latency.
 ```bash
 npm install
 npm run compile
+npm run test:ymodem
+npm run benchmark:ymodem
 ```
 
 The extension implementation is split across `src/simulatorManager.ts`,
