@@ -2,19 +2,21 @@ import * as vscode from 'vscode';
 
 export type UartMemoryMode = 'window' | 'persistent';
 
-export interface UartTerminalConfiguration {
+export interface UartConfiguration {
 	readonly path: string;
 	readonly baudRate: number;
 }
 
 const UART_MEMORY_MODE_SETTING = 'uartMemoryMode';
+/* Keep the original key so upgrading from the terminal-only implementation
+ * does not discard an existing persistent UART selection. */
 const PERSISTENT_UART_CONFIGURATION_KEY = 'elenixosToolkit.uartTerminalConfiguration';
 
 function isUartMemoryMode(value: unknown): value is UartMemoryMode {
 	return value === 'window' || value === 'persistent';
 }
 
-function parseUartTerminalConfiguration(value: unknown): UartTerminalConfiguration | undefined {
+function parseUartConfiguration(value: unknown): UartConfiguration | undefined {
 	if (!value || typeof value !== 'object') {return undefined;}
 	const configuration = value as { path?: unknown; baudRate?: unknown };
 	if (typeof configuration.path !== 'string' || configuration.path.length === 0) {return undefined;}
@@ -25,22 +27,22 @@ function parseUartTerminalConfiguration(value: unknown): UartTerminalConfigurati
 	return { path: configuration.path, baudRate: configuration.baudRate };
 }
 
-/** Owns the single source of truth for the ESH terminal's remembered UART. */
-export class UartTerminalConfigurationStore {
-	private windowConfiguration: UartTerminalConfiguration | undefined;
+/** Owns the single source of truth for the remembered UART configuration. */
+export class UartConfigurationStore {
+	private windowConfiguration: UartConfiguration | undefined;
 	private persistentWrite: Promise<void> = Promise.resolve();
 
 	constructor(private readonly globalState: vscode.Memento) {}
 
-	getRememberedConfiguration(): UartTerminalConfiguration | undefined {
+	getRememberedConfiguration(): UartConfiguration | undefined {
 		const value = this.getMemoryMode() === 'persistent'
 			? this.globalState.get<unknown>(PERSISTENT_UART_CONFIGURATION_KEY)
 			: this.windowConfiguration;
-		return parseUartTerminalConfiguration(value);
+		return parseUartConfiguration(value);
 	}
 
-	async remember(configuration: UartTerminalConfiguration): Promise<void> {
-		const normalized = parseUartTerminalConfiguration(configuration);
+	async remember(configuration: UartConfiguration): Promise<void> {
+		const normalized = parseUartConfiguration(configuration);
 		if (!normalized) {return;}
 		this.windowConfiguration = normalized;
 		if (this.getMemoryMode() !== 'persistent') {return;}

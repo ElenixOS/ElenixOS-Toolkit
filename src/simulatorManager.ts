@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import { createSimulatorIpcSocketPath } from './debugConfiguration';
 import { readReadyFile, waitForReadyFile, type SimulatorReadyInfo } from './ipc';
 import { SimulatorWebview } from './simulatorWebview';
+import { UartConfigurationStore } from './uartConfigurationStore';
 import { collectYModemFiles, YModemSender, YModemTransferControl } from './ymodem';
 import {
 	DEFAULT_UART_BAUD_RATE,
@@ -57,7 +58,11 @@ export class SimulatorManager implements vscode.Disposable {
 	private readonly ymodemPauseItem: vscode.StatusBarItem;
 	private readonly ymodemTerminateItem: vscode.StatusBarItem;
 
-	constructor(private readonly webview: SimulatorWebview, private readonly globalState: vscode.Memento) {
+	constructor(
+		private readonly webview: SimulatorWebview,
+		private readonly globalState: vscode.Memento,
+		private readonly configurationStore: UartConfigurationStore,
+	) {
 		this.openTerminalItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
 		this.openTerminalItem.text = '$(terminal) ESH Terminal';
 		this.openTerminalItem.tooltip = 'Open ElenixOS ESH Terminal';
@@ -157,34 +162,46 @@ export class SimulatorManager implements vscode.Disposable {
 				void vscode.window.showErrorMessage('No UART ports were found. Connect the target device and try again.');
 				return;
 			}
-			const port = await vscode.window.showQuickPick(
-				ports.map((info) => ({
-					label: info.path,
-					description: info.manufacturer ?? 'UART device',
-					detail: [info.serialNumber, info.vendorId && `VID ${info.vendorId}`, info.productId && `PID ${info.productId}`]
-						.filter(Boolean).join(' · '),
-					info,
-				})),
-				{ placeHolder: 'Select the UART connected to the ElenixOS device' },
-			);
-			if (!port) {return;}
 
-			const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', DEFAULT_UART_BAUD_RATE);
-			const baudRateText = await vscode.window.showInputBox({
-				prompt: 'UART baud rate (8 data bits, no parity, 1 stop bit)',
-				value: String(configuredBaudRate),
-				validateInput: (value) => {
-					const baudRate = Number(value.trim());
-					return Number.isInteger(baudRate) && baudRate > 0 && baudRate <= 4_000_000
-						? undefined : 'Enter an integer baud rate between 1 and 4000000.';
-				},
-			});
-			if (!baudRateText) {return;}
+			let uartPath: string;
+			let baudRate: number;
+			const remembered = this.configurationStore.getRememberedConfiguration();
+			if (remembered && ports.some((port) => port.path === remembered.path)) {
+				uartPath = remembered.path;
+				baudRate = remembered.baudRate;
+			}
+			else {
+				const port = await vscode.window.showQuickPick(
+					ports.map((info) => ({
+						label: info.path,
+						description: info.manufacturer ?? 'UART device',
+						detail: [info.serialNumber, info.vendorId && `VID ${info.vendorId}`, info.productId && `PID ${info.productId}`]
+							.filter(Boolean).join(' · '),
+						info,
+					})),
+					{ placeHolder: 'Select the UART connected to the ElenixOS device' },
+				);
+				if (!port) {return;}
+
+				const configuredBaudRate = vscode.workspace.getConfiguration('elenixosToolkit').get<number>('uartBaudRate', DEFAULT_UART_BAUD_RATE);
+				const baudRateText = await vscode.window.showInputBox({
+					prompt: 'UART baud rate (8 data bits, no parity, 1 stop bit)',
+					value: String(configuredBaudRate),
+					validateInput: (value) => {
+						const selectedBaudRate = Number(value.trim());
+						return Number.isInteger(selectedBaudRate) && selectedBaudRate > 0 && selectedBaudRate <= 4_000_000
+							? undefined : 'Enter an integer baud rate between 1 and 4000000.';
+					},
+				});
+				if (!baudRateText) {return;}
+				uartPath = port.info.path;
+				baudRate = Number(baudRateText.trim());
+			}
 
 			const uartConfiguration = vscode.workspace.getConfiguration('elenixosToolkit');
 			const writeChunkSize = uartConfiguration.get<number>('ymodemWriteChunkSize', DEFAULT_YMODEM_UART_CHUNK_SIZE);
 			const writeChunkDelayMs = uartConfiguration.get<number>('ymodemWriteChunkDelayMs', DEFAULT_YMODEM_UART_CHUNK_DELAY_MS);
-			const transport = new UartTransport(port.info.path, Number(baudRateText.trim()), {
+			const transport = new UartTransport(uartPath, baudRate, {
 				writeChunkSize,
 				writeChunkDelayMs,
 			});
@@ -192,11 +209,12 @@ export class SimulatorManager implements vscode.Disposable {
 			this.ymodemControl = control;
 			this.updateYModemControls();
 			await vscode.window.withProgress(
-				{ location: vscode.ProgressLocation.Notification, title: `Sending with YMODEM over ${port.info.path}`, cancellable: true },
+				{ location: vscode.ProgressLocation.Notification, title: `Sending with YMODEM over ${uartPath}`, cancellable: true },
 				async (progress, token) => {
 					const cancellation = token.onCancellationRequested(() => control?.terminate());
 					try {
 						await transport.open();
+						await this.configurationStore.remember({ path: uartPath, baudRate }).catch(() => undefined);
 						const sender = new YModemSender({
 							control,
 							onProgress: ({ file, fileIndex, fileCount, bytesSent, totalBytes, bytesPerSecond }) => {

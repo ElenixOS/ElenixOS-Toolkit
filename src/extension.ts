@@ -4,7 +4,7 @@ import { DebugIntegration } from './debugIntegration';
 import { SimulatorManager } from './simulatorManager';
 import { SimulatorWebview } from './simulatorWebview';
 import { EshTerminalManager } from './eshTerminalManager';
-import { UartTerminalConfigurationStore } from './uartTerminalConfiguration';
+import { UartConfigurationStore } from './uartConfigurationStore';
 
 export function activate(context: vscode.ExtensionContext): void {
 	const debugConfigurationProvider = new SimulatorDebugConfigurationProvider();
@@ -13,8 +13,9 @@ export function activate(context: vscode.ExtensionContext): void {
 		onClosed: () => manager.webviewClosed(),
 		onConnectionLost: () => manager.webviewConnectionLost(),
 	});
-	manager = new SimulatorManager(webview, context.globalState);
-	const eshTerminal = new EshTerminalManager(new UartTerminalConfigurationStore(context.globalState));
+	const uartConfigurationStore = new UartConfigurationStore(context.globalState);
+	manager = new SimulatorManager(webview, context.globalState, uartConfigurationStore);
+	const eshTerminal = new EshTerminalManager(uartConfigurationStore);
 	const webviewSerializer = vscode.window.registerWebviewPanelSerializer('elenixosSimulator', {
 		deserializeWebviewPanel: async (panel) => webview.restore(panel),
 	});

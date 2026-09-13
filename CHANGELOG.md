@@ -5,8 +5,8 @@
 ### Added
 
 - Added `elenixosToolkit.uartMemoryMode` with `window` and `persistent` modes
-  for remembering the ESH Terminal's last successfully connected UART port and
-  baud rate.
+  for remembering the last successfully connected UART port and baud rate for
+  the ESH Terminal and YMODEM transfers.
 - Added automatic UART configuration restoration with fallback to the normal
   port picker when the remembered device is unavailable.
 - Added YMODEM pause, resume, terminate, progress, and transfer statistics

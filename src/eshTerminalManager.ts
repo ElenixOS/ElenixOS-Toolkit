@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { EshTerminalConnection } from './eshTerminalSession';
 import { EshTerminalPseudoterminal } from './eshTerminalPseudoterminal';
-import { UartTerminalConfigurationStore } from './uartTerminalConfiguration';
+import { UartConfigurationStore } from './uartConfigurationStore';
 import { DEFAULT_UART_BAUD_RATE, listUartPorts } from './uart';
 
 interface EshPortPick extends vscode.QuickPickItem {
@@ -15,7 +15,7 @@ export class EshTerminalManager implements vscode.Disposable {
 	private terminalCloseSubscription: vscode.Disposable | undefined;
 	private disposed = false;
 
-	constructor(private readonly configurationStore: UartTerminalConfigurationStore) {}
+	constructor(private readonly configurationStore: UartConfigurationStore) {}
 
 	async open(): Promise<void> {
 		if (this.disposed) {return;}
