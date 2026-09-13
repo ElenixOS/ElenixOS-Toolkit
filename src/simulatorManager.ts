@@ -52,10 +52,22 @@ export class SimulatorManager implements vscode.Disposable {
 	private active: ActiveSimulator | undefined;
 	private cleanupBarrier: Promise<void> = Promise.resolve();
 	private ymodemControl: YModemTransferControl | undefined;
+	private readonly openTerminalItem: vscode.StatusBarItem;
+	private readonly sendYModemItem: vscode.StatusBarItem;
 	private readonly ymodemPauseItem: vscode.StatusBarItem;
 	private readonly ymodemTerminateItem: vscode.StatusBarItem;
 
 	constructor(private readonly webview: SimulatorWebview, private readonly globalState: vscode.Memento) {
+		this.openTerminalItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+		this.openTerminalItem.text = '$(terminal) ESH Terminal';
+		this.openTerminalItem.tooltip = 'Open ElenixOS ESH Terminal';
+		this.openTerminalItem.command = 'elenixos-toolkit.openEshTerminal';
+		this.openTerminalItem.show();
+		this.sendYModemItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
+		this.sendYModemItem.text = '$(cloud-upload) Send File';
+		this.sendYModemItem.tooltip = 'Send a file or folder with YMODEM over UART';
+		this.sendYModemItem.command = 'elenixos-toolkit.sendYModem';
+		this.sendYModemItem.show();
 		this.ymodemPauseItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 		this.ymodemPauseItem.command = 'elenixos-toolkit.toggleYModemPause';
 		this.ymodemTerminateItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 99);
@@ -338,6 +350,8 @@ export class SimulatorManager implements vscode.Disposable {
 
 	dispose(): void {
 		this.ymodemControl?.terminate();
+		this.openTerminalItem.dispose();
+		this.sendYModemItem.dispose();
 		this.ymodemPauseItem.dispose();
 		this.ymodemTerminateItem.dispose();
 		/* Keep the WebviewPanel alive for VS Code's panel serializer.  This lets
