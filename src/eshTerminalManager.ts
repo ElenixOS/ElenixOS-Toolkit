@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { EshTerminalConnection } from './eshTerminalSession';
 import { EshTerminalPseudoterminal } from './eshTerminalPseudoterminal';
+import { UartTerminalConfigurationStore } from './uartTerminalConfiguration';
 import { DEFAULT_UART_BAUD_RATE, listUartPorts } from './uart';
 
 interface EshPortPick extends vscode.QuickPickItem {
@@ -14,6 +15,8 @@ export class EshTerminalManager implements vscode.Disposable {
 	private terminalCloseSubscription: vscode.Disposable | undefined;
 	private disposed = false;
 
+	constructor(private readonly configurationStore: UartTerminalConfigurationStore) {}
+
 	async open(): Promise<void> {
 		if (this.disposed) {return;}
 		if (this.terminal && this.pty?.isConnected()) {
@@ -21,12 +24,16 @@ export class EshTerminalManager implements vscode.Disposable {
 			return;
 		}
 
-		const connection = await this.selectConnection();
+		const connection = await this.selectConnection(true);
 		if (!connection) {return;}
 		const pty = this.ensureTerminal();
 		this.terminal?.show(true);
 		try {
 			await pty.connect(connection);
+			/* A storage failure must not turn a successful UART connection into a
+			 * connection error, but wait for the write before returning so an
+			 * immediate close/reopen observes the newest configuration. */
+			await this.configurationStore.remember(connection).catch(() => undefined);
 		}
 		catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -37,12 +44,15 @@ export class EshTerminalManager implements vscode.Disposable {
 
 	async switchPort(): Promise<void> {
 		if (this.disposed) {return;}
-		const connection = await this.selectConnection();
+		/* A switch is an explicit user choice, so do not silently reuse the
+		 * remembered port before showing the picker. */
+		const connection = await this.selectConnection(false);
 		if (!connection) {return;}
 		const pty = this.ensureTerminal();
 		this.terminal?.show(true);
 		try {
 			await pty.connect(connection);
+			await this.configurationStore.remember(connection).catch(() => undefined);
 		}
 		catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
@@ -91,7 +101,7 @@ export class EshTerminalManager implements vscode.Disposable {
 		return pty;
 	}
 
-	private async selectConnection(): Promise<EshTerminalConnection | undefined> {
+	private async selectConnection(useRememberedConfiguration: boolean): Promise<EshTerminalConnection | undefined> {
 		let ports: Awaited<ReturnType<typeof listUartPorts>>;
 		try {
 			ports = (await listUartPorts()).sort((left, right) => left.path.localeCompare(right.path));
@@ -104,6 +114,12 @@ export class EshTerminalManager implements vscode.Disposable {
 		if (ports.length === 0) {
 			void vscode.window.showErrorMessage('No UART ports were found. Connect the ElenixOS device and try again.');
 			return undefined;
+		}
+		if (useRememberedConfiguration) {
+			const remembered = this.configurationStore.getRememberedConfiguration();
+			if (remembered && ports.some((port) => port.path === remembered.path)) {
+				return remembered;
+			}
 		}
 
 		const selected = await vscode.window.showQuickPick<EshPortPick>(ports.map((info) => ({

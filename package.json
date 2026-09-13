@@ -86,6 +86,19 @@
           "maximum": 4000000,
           "description": "Default UART baud rate used by the ElenixOS ESH Terminal and YMODEM transfer."
         },
+        "elenixosToolkit.uartMemoryMode": {
+          "type": "string",
+          "enum": [
+            "window",
+            "persistent"
+          ],
+          "enumDescriptions": [
+            "Remember the ESH Terminal UART only while this VS Code window is open.",
+            "Remember the ESH Terminal UART across VS Code restarts and workspace reopenings."
+          ],
+          "default": "window",
+          "description": "Controls how the ESH Terminal remembers the last successfully connected UART configuration."
+        },
         "elenixosToolkit.ymodemWriteChunkSize": {
           "type": "integer",
           "default": 0,

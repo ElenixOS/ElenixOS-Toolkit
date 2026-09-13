@@ -127,6 +127,12 @@ VS Code pseudoterminal: ESH owns command editing, history, cursor movement,
 echo, and command execution, while VS Code handles ANSI/VT terminal rendering,
 scrollback, copy/paste, keyboard input, and resizing.
 
+The last successfully connected UART port and baud rate are remembered according
+to `elenixosToolkit.uartMemoryMode`. `window` keeps the configuration only in the
+current VS Code window; `persistent` stores it across VS Code restarts and
+workspace reopenings. If the remembered port is unavailable, Toolkit returns to
+the normal UART selection flow.
+
 Run `ElenixOS: Switch ESH Terminal Port` to reconnect the existing terminal to
 another device. The ESH terminal and YMODEM can use the same UART session.
 While YMODEM is active, Toolkit disables terminal input until the transfer
